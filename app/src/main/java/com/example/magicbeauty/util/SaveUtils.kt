@@ -6,7 +6,6 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import java.io.OutputStream
 
 object SaveUtils {
 
@@ -22,10 +21,9 @@ object SaveUtils {
             }
         }
         val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
-        var os: OutputStream? = null
         return try {
-            os = resolver.openOutputStream(uri)
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, os!!)
+            val os = resolver.openOutputStream(uri) ?: error("无法打开输出流")
+            os.use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 values.clear()
                 values.put(MediaStore.Images.Media.IS_PENDING, 0)
@@ -33,9 +31,9 @@ object SaveUtils {
             }
             true
         } catch (_: Exception) {
+            // 失败时删掉半成品条目，避免相册里留下 0 字节坏图
+            try { resolver.delete(uri, null, null) } catch (_: Exception) {}
             false
-        } finally {
-            os?.close()
         }
     }
 
@@ -51,10 +49,9 @@ object SaveUtils {
             }
         }
         val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return false
-        var os: OutputStream? = null
         return try {
-            os = resolver.openOutputStream(uri)
-            os?.write(bytes)
+            val os = resolver.openOutputStream(uri) ?: error("无法打开输出流")
+            os.use { it.write(bytes) }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 values.clear()
                 values.put(MediaStore.Video.Media.IS_PENDING, 0)
@@ -62,9 +59,8 @@ object SaveUtils {
             }
             true
         } catch (_: Exception) {
+            try { resolver.delete(uri, null, null) } catch (_: Exception) {}
             false
-        } finally {
-            os?.close()
         }
     }
 }

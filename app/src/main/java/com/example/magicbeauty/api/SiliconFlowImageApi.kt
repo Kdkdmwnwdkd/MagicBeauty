@@ -5,100 +5,105 @@ import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
- * 硅基流动（SiliconFlow）图像 API 适配器 —— 用于「AI 生成头发丝」。
- * 本质：把原图 + 提示词发给图像大模型做“局部重绘 / 图生图”，由模型生成本来没有的发丝。
- * 这是生成式大模型（非视频生成），手机端实时跑不了，才走云端 API。
+ * 硅基流动（SiliconFlow）图像 API —— 用于「AI 生成头发丝」。
  *
- * 默认走 /images/edits（图生图+局部重绘）。若你的模型只支持文本生图，
- * 可改用 generateByPrompt() 纯提示词生成。
+ * 关键：硅基流动**没有** /v1/images/edits 这个接口（旧代码调它就是 404）。
+ * 官方只有一个 POST /v1/images/generations，图生图/编辑是把原图放进 JSON 的 image 字段：
+ *   {
+ *     "model": "Qwen/Qwen-Image-Edit-2509",
+ *     "prompt": "...",
+ *     "image": "data:image/png;base64,xxxx"
+ *   }
+ * Qwen/Qwen-Image-Edit-2509 支持图片输入（且不支持 image_size 字段）。
  */
 class SiliconFlowImageApi {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
         .build()
     private val gson = Gson()
 
-    // 可选模型：black-forest-labs/FLUX.1-dev、FLUX.1.1-pro、Kwai-Kolors/Kolors 等
-    var model: String = "black-forest-labs/FLUX.1-dev"
+    /** 支持图片输入的编辑模型；FLUX.1-dev 是纯文生图，不能用于改图。 */
+    var model: String = "Qwen/Qwen-Image-Edit-2509"
 
     /**
-     * 生成头发丝：上传原图 + 提示词，返回生成后的图片字节。
-     * @param imageBytes 原图
-     * @param prompt 描述想要的发型/发丝，例如 “flowing long wavy hair, extra wispy strands, anime style”
+     * 生成头发丝：原图 + 提示词 -> 结果图字节。
+     * @param imageBytes 原图（PNG 字节）
+     * @param prompt 描述想要的发型/发丝
      */
     suspend fun generateHair(imageBytes: ByteArray, prompt: String): ByteArray =
         withContext(Dispatchers.IO) {
-            require(ApiConfig.siliconFlowKey.isNotBlank()) { "未配置硅基流动密钥，请到 App 底部「设置」页填写（注册 cloud.siliconflow.cn 获取 sk- 开头的 Key）" }
+            val key = ApiConfig.siliconFlowKey
+            require(key.isNotBlank()) {
+                "未配置硅基流动密钥，请到 App 底部「设置」页填写（注册 cloud.siliconflow.cn 获取 sk- 开头的 Key）"
+            }
 
-            val imagePart = MultipartBody.Part.createFormData(
-                "image", "input.png",
-                imageBytes.toRequestBody("image/png".toMediaType())
+            val b64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+            val payload = linkedMapOf<String, Any>(
+                "model" to model,
+                "prompt" to prompt,
+                "image" to "data:image/png;base64,$b64"
             )
-            val promptPart = MultipartBody.Part.createFormData("prompt", prompt)
-            val modelPart = MultipartBody.Part.createFormData("model", model)
-            // 可选 mask：留空则对整图按 prompt 重绘；如需只改头发，可上传头发区域蒙版
-            val body = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addPart(imagePart)
-                .addPart(promptPart)
-                .addPart(modelPart)
-                .build()
+            val body = gson.toJson(payload).toRequestBody("application/json".toMediaType())
 
             val request = Request.Builder()
-                .url("${ApiConfig.SILICONFLOW_URL}/edits")
-                .addHeader("Authorization", "Bearer ${ApiConfig.siliconFlowKey}")
+                .url("${ApiConfig.SILICONFLOW_URL}/generations")
+                .addHeader("Authorization", "Bearer $key")
+                .addHeader("Content-Type", "application/json")
                 .post(body)
                 .build()
 
             client.newCall(request).execute().use { resp ->
                 val raw = resp.body?.string().orEmpty()
-                require(resp.isSuccessful) { "SiliconFlow 返回错误: $raw" }
+                require(resp.isSuccessful) { "SiliconFlow 返回 ${resp.code}: ${raw.take(300)}" }
                 val json = gson.fromJson(raw, Map::class.java)
-                val images = (json["images"] as? List<*>)?.firstOrNull() as? Map<*, *>
+                val image = (json["images"] as? List<*>)?.firstOrNull() as? Map<*, *>
+                val url = image?.get("url") as? String
+                val b64Out = image?.get("b64_json") as? String
                 when {
-                    images?.get("url") != null -> download(images["url"] as String)
-                    images?.get("b64_json") != null ->
-                        Base64.decode(images["b64_json"] as String, Base64.NO_WRAP)
-                    else -> error("SiliconFlow 响应中未找到图片: $raw")
+                    url != null -> download(url)
+                    b64Out != null -> Base64.decode(b64Out, Base64.NO_WRAP)
+                    else -> error("SiliconFlow 响应中未找到图片: ${raw.take(300)}")
                 }
             }
         }
 
-    /** 纯提示词生成（不传原图）。 */
+    /** 纯提示词生成（不传原图），保留给以后扩展用。 */
     suspend fun generateByPrompt(prompt: String): ByteArray = withContext(Dispatchers.IO) {
-        require(ApiConfig.siliconFlowKey.isNotBlank()) { "未配置硅基流动密钥，请到 App 底部「设置」页填写" }
+        val key = ApiConfig.siliconFlowKey
+        require(key.isNotBlank()) { "未配置硅基流动密钥，请到 App 底部「设置」页填写" }
         val payload = gson.toJson(
             mapOf(
-                "model" to model,
+                "model" to "Kwai-Kolors/Kolors",
                 "prompt" to prompt,
-                "image_size" to "1024x1024",
-                "n" to 1,
-                "response_format" to "b64_json"
+                "image_size" to "1024x1024"
             )
         )
         val request = Request.Builder()
             .url("${ApiConfig.SILICONFLOW_URL}/generations")
-            .addHeader("Authorization", "Bearer ${ApiConfig.siliconFlowKey}")
+            .addHeader("Authorization", "Bearer $key")
+            .addHeader("Content-Type", "application/json")
             .post(payload.toRequestBody("application/json".toMediaType()))
             .build()
         client.newCall(request).execute().use { resp ->
             val raw = resp.body?.string().orEmpty()
-            require(resp.isSuccessful) { "SiliconFlow 返回错误: $raw" }
+            require(resp.isSuccessful) { "SiliconFlow 返回 ${resp.code}: ${raw.take(300)}" }
             val json = gson.fromJson(raw, Map::class.java)
-            val images = (json["images"] as? List<*>)?.firstOrNull() as? Map<*, *>
-            val b64 = images?.get("b64_json") as? String
-                ?: images?.get("url") as? String
-                ?: error("未找到图片: $raw")
-            if (b64.startsWith("http")) download(b64) else Base64.decode(b64, Base64.NO_WRAP)
+            val image = (json["images"] as? List<*>)?.firstOrNull() as? Map<*, *>
+            val url = image?.get("url") as? String
+            val b64 = image?.get("b64_json") as? String
+            when {
+                url != null -> download(url)
+                b64 != null -> Base64.decode(b64, Base64.NO_WRAP)
+                else -> error("未找到图片: ${raw.take(300)}")
+            }
         }
     }
 

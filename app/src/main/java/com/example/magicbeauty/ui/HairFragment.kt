@@ -14,12 +14,14 @@ import androidx.lifecycle.lifecycleScope
 import com.example.magicbeauty.api.ApiConfig
 import com.example.magicbeauty.api.BeautyService
 import com.example.magicbeauty.databinding.FragmentHairBinding
+import com.example.magicbeauty.engine.HairSegmenter
 import com.example.magicbeauty.engine.LocalHairEngine
+import com.example.magicbeauty.util.BitmapUtils
 import com.example.magicbeauty.util.SaveUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.InputStream
+import java.io.ByteArrayOutputStream
 
 class HairFragment : Fragment() {
 
@@ -27,23 +29,15 @@ class HairFragment : Fragment() {
     private val binding get() = _binding!!
 
     private var imageUri: Uri? = null
-    private var sourceBitmap: Bitmap? = null
     private var resultBitmap: Bitmap? = null
+    private var segmenter: HairSegmenter? = null
 
     private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
             imageUri = it
-            sourceBitmap = loadBitmap(it)
-            binding.btnGen.isEnabled = true
+            if (_binding != null) binding.btnGen.isEnabled = true
         }
     }
-
-    private fun loadBitmap(uri: Uri): Bitmap? = try {
-        val stream: InputStream? = requireContext().contentResolver.openInputStream(uri)
-        val bmp = BitmapFactory.decodeStream(stream)
-        stream?.close()
-        bmp
-    } catch (_: Exception) { null }
 
     override fun onCreateView(inflater: LayoutInflater, c: ViewGroup?, s: Bundle?): View {
         _binding = FragmentHairBinding.inflate(inflater, c, false)
@@ -57,24 +51,36 @@ class HairFragment : Fragment() {
         binding.btnSave.setOnClickListener { save() }
     }
 
+    private fun ensureSegmenter(): HairSegmenter =
+        segmenter ?: HairSegmenter(requireContext().applicationContext).also { segmenter = it }
+
     private fun generate() {
         val uri = imageUri ?: return
         val useLocal = binding.rbLocal.isChecked
-        lifecycleScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) {
-                binding.progress.visibility = View.VISIBLE
-                binding.btnGen.isEnabled = false
-            }
+        val ctx = context ?: return
+
+        lifecycleScope.launch {
+            showBusy(true)
             try {
                 if (useLocal) {
-                    // 端侧托底：离线换发色，零成本
-                    val src = sourceBitmap ?: throw Exception("未选择图片")
-                    val out = LocalHairEngine.recolor(src)
+                    // 端侧托底：离线换发色，只作用于头发区域
+                    val src = withContext(Dispatchers.IO) {
+                        BitmapUtils.decodeSampled(ctx, uri, 1600)
+                    } ?: throw Exception("图片读取失败")
+
+                    var usedMask = true
+                    val out = withContext(Dispatchers.IO) {
+                        val mask = try { ensureSegmenter().hairMask(src) } catch (_: Throwable) { null }
+                        usedMask = mask != null
+                        LocalHairEngine.recolor(src, mask)
+                    }
+
                     resultBitmap = out
-                    withContext(Dispatchers.Main) {
+                    if (_binding != null) {
                         binding.preview.setImageBitmap(out)
                         binding.btnSave.isEnabled = true
                     }
+                    if (!usedMask) toast("未识别到头发，已退回整图调色")
                 } else {
                     // 云端生成式：需要硅基流动 Key
                     if (ApiConfig.siliconFlowKey.isBlank()) {
@@ -82,38 +88,60 @@ class HairFragment : Fragment() {
                     }
                     val prompt = binding.etPrompt.text.toString()
                         .ifBlank { "flowing long wavy hair with wispy strands, silky, anime style" }
-                    val stream: InputStream? = requireContext().contentResolver.openInputStream(uri)
-                    val data = stream?.readBytes() ?: byteArrayOf()
-                    stream?.close()
-                    val outBytes = BeautyService.generateHair(data, prompt)
-                    val bmp = BitmapFactory.decodeByteArray(outBytes, 0, outBytes.size)
-                    resultBitmap = bmp
-                    withContext(Dispatchers.Main) {
-                        binding.preview.setImageBitmap(bmp)
+
+                    val bmp = withContext(Dispatchers.IO) {
+                        BitmapUtils.decodeSampled(ctx, uri, 1536)
+                    } ?: throw Exception("图片读取失败")
+
+                    val pngBytes = withContext(Dispatchers.IO) {
+                        ByteArrayOutputStream().use { bos ->
+                            bmp.compress(Bitmap.CompressFormat.PNG, 100, bos)
+                            bos.toByteArray()
+                        }
+                    }
+
+                    val outBytes = BeautyService.generateHair(pngBytes, prompt)
+                    val outBmp = BitmapFactory.decodeByteArray(outBytes, 0, outBytes.size)
+                        ?: throw Exception("返回的图片无法解析")
+
+                    resultBitmap = outBmp
+                    if (_binding != null) {
+                        binding.preview.setImageBitmap(outBmp)
                         binding.btnSave.isEnabled = true
                     }
                 }
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "失败：${e.message}", Toast.LENGTH_LONG).show()
-                }
+                toast("失败：${e.message}")
             } finally {
-                withContext(Dispatchers.Main) {
-                    binding.progress.visibility = View.GONE
-                    binding.btnGen.isEnabled = true
-                }
+                showBusy(false)
             }
         }
+    }
+
+    private fun showBusy(busy: Boolean) {
+        if (_binding == null) return
+        binding.progress.visibility = if (busy) View.VISIBLE else View.GONE
+        binding.btnGen.isEnabled = !busy
     }
 
     private fun save() {
         val bmp = resultBitmap ?: return
         val ok = SaveUtils.saveBitmap(requireContext(), bmp, "magic_hair_${System.currentTimeMillis()}")
-        Toast.makeText(requireContext(), if (ok) "已保存到相册/MagicBeauty" else "保存失败", Toast.LENGTH_SHORT).show()
+        toast(if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）")
+    }
+
+    private fun toast(msg: String) {
+        if (isAdded) Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try { segmenter?.close() } catch (_: Exception) {}
+        segmenter = null
     }
 }

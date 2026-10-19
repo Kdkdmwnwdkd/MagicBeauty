@@ -6,7 +6,6 @@ package com.example.magicbeauty.api
  * （图片级美颜/瘦身已由本地引擎完成，无需经过这里。）
  */
 object BeautyService {
-    val tencent = TencentCloudBeautyApi()
     val siliconFlow = SiliconFlowImageApi()
     val videoSlim = VideoSlimApi()
 

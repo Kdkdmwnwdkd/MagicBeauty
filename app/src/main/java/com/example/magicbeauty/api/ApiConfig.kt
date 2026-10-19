@@ -7,17 +7,8 @@ import com.example.magicbeauty.Prefs
  * 方便无电脑的用户直接在手机上粘贴 key 使用。
  */
 object ApiConfig {
-    val tencentSecretId: String get() = ""
-    val tencentSecretKey: String get() = ""
-
     // 硅基流动：从本机设置读取
     val siliconFlowKey: String get() = Prefs.siliconFlowKey
-
-    // 腾讯云人脸美颜 API 配置
-    const val TENCENT_HOST = "iai.tencentcloudapi.com"
-    const val TENCENT_SERVICE = "iai"
-    const val TENCENT_VERSION = "2020-03-04"
-    const val TENCENT_REGION = "ap-guangzhou"
 
     // 硅基流动（SiliconFlow）图像 API
     const val SILICONFLOW_URL = "https://api.siliconflow.cn/v1/images"

@@ -35,8 +35,8 @@ android {
 
     buildFeatures { viewBinding = true }
 
-    // 不压缩 .task 模型文件，MediaPipe 需直接 mmap
-    aaptOptions { noCompress += listOf("task") }
+    // MediaPipe 需要直接 mmap 模型文件，.task / .tflite 都不能压缩
+    androidResources { noCompress += listOf("task", "tflite") }
 }
 
 dependencies {
@@ -60,9 +60,7 @@ dependencies {
     // 协程（API 异步）
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // 外部 API（仅视频瘦身 / 画发丝 使用）
-    implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    // 外部 API（仅画发丝 / 可选云端视频瘦身使用）
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
 

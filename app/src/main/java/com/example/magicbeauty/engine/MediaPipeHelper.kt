@@ -21,7 +21,11 @@ class MediaPipeHelper(context: Context) {
     private val appContext = context.applicationContext
     private val executor = Executors.newSingleThreadExecutor()
 
+    private var faceCreated = false
+    private var poseCreated = false
+
     private val faceLandmarker: FaceLandmarker by lazy {
+        faceCreated = true
         val base = BaseOptions.builder()
             .setModelAssetPath("face_landmarker.task")
             .setDelegate(Delegate.CPU)
@@ -35,6 +39,7 @@ class MediaPipeHelper(context: Context) {
     }
 
     private val poseLandmarker: PoseLandmarker by lazy {
+        poseCreated = true
         val base = BaseOptions.builder()
             .setModelAssetPath("pose_landmarker_lite.task")
             .setDelegate(Delegate.CPU)
@@ -87,8 +92,9 @@ class MediaPipeHelper(context: Context) {
     }
 
     fun close() {
-        try { faceLandmarker.close() } catch (_: Exception) {}
-        try { poseLandmarker.close() } catch (_: Exception) {}
+        // 只关已经真正创建过的，避免 close() 反过来把 lazy 模型加载一遍
+        if (faceCreated) try { faceLandmarker.close() } catch (_: Exception) {}
+        if (poseCreated) try { poseLandmarker.close() } catch (_: Exception) {}
         executor.shutdown()
     }
 

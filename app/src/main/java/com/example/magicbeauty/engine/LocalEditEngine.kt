@@ -34,6 +34,8 @@ class LocalEditEngine {
 
     private var width = 0
     private var height = 0
+    private var targetsW = 0
+    private var targetsH = 0
 
     private val quadPos = floatArrayOf(
         -1f, -1f, 1f, -1f, -1f, 1f,
@@ -75,6 +77,9 @@ class LocalEditEngine {
     /** 设置源图。btmp 会被等比缩放到 maxDim 以内。 */
     fun setSource(bitmap: Bitmap, maxDim: Int = 1280): Bitmap {
         initGL()
+        // EGL 上下文是线程绑定的：每次调用都重新 makeCurrent，
+        // 这样即使调用方换了线程（协程 IO 池）也能保证 GL 有效。
+        EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
         var b = bitmap
         val longer = maxOf(b.width, b.height)
         if (longer > maxDim) {
@@ -97,6 +102,7 @@ class LocalEditEngine {
     /** 用当前参数渲染一帧，返回处理后的 Bitmap（已翻转回正常方向）。 */
     fun render(params: EditParams, guide: WarpGuide = WarpGuide()): Bitmap {
         initGL()
+        EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboA)
         GLES20.glViewport(0, 0, width, height)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
@@ -154,17 +160,23 @@ class LocalEditEngine {
         EGL14.eglDestroySurface(eglDisplay, eglSurface)
         EGL14.eglTerminate(eglDisplay)
         initialized = false
+        texSrc = 0; texA = 0; texB = 0
+        fboA = 0; fboB = 0
+        targetsW = 0; targetsH = 0
     }
 
     // ---------- GL 辅助 ----------
 
     private fun ensureTargets(w: Int, h: Int) {
+        // 尺寸没变就复用，避免视频逐帧重建全屏纹理（原来每帧都重建，极慢）
+        if (targetsW == w && targetsH == h && texA != 0 && texB != 0 && fboA != 0 && fboB != 0) return
         if (texA != 0) GLES20.glDeleteTextures(1, intArrayOf(texA), 0)
         if (texB != 0) GLES20.glDeleteTextures(1, intArrayOf(texB), 0)
         if (fboA != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboA), 0)
         if (fboB != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboB), 0)
         val a = createTarget(w, h); texA = a.first; fboA = a.second
         val b = createTarget(w, h); texB = b.first; fboB = b.second
+        targetsW = w; targetsH = h
     }
 
     /** 创建“纹理 + 绑定它的 FBO”，返回 (纹理名, FBO名)。 */
@@ -203,21 +215,26 @@ class LocalEditEngine {
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
         val buf = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
-        val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val row = IntArray(width)
-        val bytes = buf.array()
+        // 注意：allocateDirect 的 Buffer 没有可访问的 backing array，
+        // 调 buf.array() 会抛 UnsupportedOperationException（这正是之前必崩的原因）。
+        // 正确做法是先把数据读进普通 ByteArray。
+        val bytes = ByteArray(width * height * 4)
+        buf.position(0)
+        buf.get(bytes)
+        val pixels = IntArray(width * height)
         for (y in 0 until height) {
-            val src = (height - 1 - y) * width * 4
+            val srcRow = (height - 1 - y) * width * 4
+            val dstRow = y * width
             for (x in 0 until width) {
-                val r = bytes[src + x * 4].toInt() and 0xff
-                val g = bytes[src + x * 4 + 1].toInt() and 0xff
-                val b = bytes[src + x * 4 + 2].toInt() and 0xff
-                val a = bytes[src + x * 4 + 3].toInt() and 0xff
-                row[x] = (a shl 24) or (r shl 16) or (g shl 8) or b
+                val i = srcRow + x * 4
+                val r = bytes[i].toInt() and 0xff
+                val g = bytes[i + 1].toInt() and 0xff
+                val b = bytes[i + 2].toInt() and 0xff
+                val a = bytes[i + 3].toInt() and 0xff
+                pixels[dstRow + x] = (a shl 24) or (r shl 16) or (g shl 8) or b
             }
-            out.setPixels(row, 0, width, 0, y, width, 1)
         }
-        return out
+        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
     }
 
     private fun buildProgram(vs: String, fs: String): Int {

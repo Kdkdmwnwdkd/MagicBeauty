@@ -62,7 +62,8 @@ object Shaders {
                 float band = exp(-tb * tb);
                 float inside = step(abs(uv.x - uBodyCenter.x), uBodyHalfW);
                 float dir = sign(uv.x - uBodyCenter.x);
-                uv.x -= dir * uWaistSlim * band * inside * 0.12;
+                // 逆向采样：向“外侧”取样，使腰线向内收（此前写成 -= 会越调越宽）
+                uv.x += dir * uWaistSlim * band * inside * 0.10;
             }
 
             // —— 身体：拉腿 / 调身高（把腿区采样点整体上移，腿显长）——
@@ -81,7 +82,8 @@ object Shaders {
                 float band = exp(-ty * ty);
                 float dir = sign(uv.x - uFaceCenter.x);
                 float near = clamp(1.0 - abs(uv.x - uFaceCenter.x) * 2.2, 0.0, 1.0);
-                uv.x -= dir * uThinFace * band * near * 0.13;
+                // 同上：向外侧取样 => 脸颊向内收 => 显瘦（此前 -= 会显胖）
+                uv.x += dir * uThinFace * band * near * 0.11;
             }
 
             // —— 人脸：大眼 ——

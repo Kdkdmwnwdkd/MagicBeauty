@@ -16,9 +16,8 @@ import com.example.magicbeauty.engine.LocalVideoSlimEngine
 import com.example.magicbeauty.util.SaveUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import java.io.InputStream
+import java.io.File
 
 class VideoSlimFragment : Fragment() {
 
@@ -31,8 +30,10 @@ class VideoSlimFragment : Fragment() {
     private val pickVideo = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
             videoUri = it
-            binding.btnProcess.isEnabled = true
-            binding.tvStatus.text = "已选择视频，点击开始处理"
+            if (_binding != null) {
+                binding.btnProcess.isEnabled = true
+                binding.tvStatus.text = "已选择视频，点击开始处理"
+            }
         }
     }
 
@@ -50,68 +51,94 @@ class VideoSlimFragment : Fragment() {
 
     private fun process() {
         val uri = videoUri ?: return
-        val strength = binding.etStrength.text.toString().toFloatOrNull() ?: 0.5f
+        val strength = binding.etStrength.text.toString().toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.5f
         val waist = strength
-        val leg = strength * 0.6f
+        val leg = strength * 0.5f
+        val ctx = context ?: return
 
-        lifecycleScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) {
-                binding.progress.visibility = View.VISIBLE
-                binding.progress.isIndeterminate = true
-                binding.btnProcess.isEnabled = false
-                binding.tvStatus.text = "处理中（端侧逐帧较慢，请耐心等待）…"
-            }
+        lifecycleScope.launch {
+            setBusy(true)
+            var inFile: File? = null
+            var outFile: File? = null
             try {
-                val bytes: InputStream? = requireContext().contentResolver.openInputStream(uri)
-                val data = bytes?.readBytes() ?: byteArrayOf()
-                bytes?.close()
+                // 先把视频落到本地文件，避免整包读进内存（旧版 readBytes 大视频必 OOM）
+                val src = File(ctx.cacheDir, "mb_in_${System.currentTimeMillis()}.mp4")
+                inFile = src
+                withContext(Dispatchers.IO) {
+                    val input = ctx.contentResolver.openInputStream(uri) ?: throw Exception("无法读取视频")
+                    input.use { i -> src.outputStream().use { o -> i.copyTo(o) } }
+                }
 
                 resultBytes = if (ApiConfig.videoSlimEndpoint.isBlank()) {
-                    // 端侧本地处理：纯手机计算，离线免费
-                    val engine = LocalVideoSlimEngine(requireContext())
-                    engine.process(
-                        data, waist, leg,
-                        onProgress = { done, total ->
-                            runBlocking(Dispatchers.Main) {
-                                binding.progress.isIndeterminate = false
-                                binding.progress.max = total
-                                binding.progress.progress = done
-                                binding.tvStatus.text = "端侧处理中 $done/$total"
-                            }
-                        },
-                        onLog = { msg ->
-                            runBlocking(Dispatchers.Main) { binding.tvStatus.text = msg }
-                        }
-                    )
+                    val target = File(ctx.cacheDir, "mb_out_${System.currentTimeMillis()}.mp4")
+                    outFile = target
+                    val engine = LocalVideoSlimEngine(ctx)
+                    val done = withContext(Dispatchers.IO) {
+                        engine.process(
+                            src, target, waist, leg,
+                            onProgress = { d, total -> ui { updateProgress(d, total) } },
+                            onLog = { msg -> ui { setStatus(msg) } }
+                        )
+                    }
+                    withContext(Dispatchers.IO) { done.readBytes() }
                 } else {
-                    // 云端处理：走你配置的瘦身终点
+                    val data = withContext(Dispatchers.IO) { src.readBytes() }
                     BeautyService.slimVideo(
                         data, "input.mp4",
                         mapOf("strength" to strength.toString())
                     )
                 }
 
-                withContext(Dispatchers.Main) {
-                    binding.tvStatus.text = "处理完成，可保存到相册"
-                    binding.btnSave.isEnabled = true
-                }
+                ui { setStatus("处理完成，可保存到相册") }
+                if (_binding != null) binding.btnSave.isEnabled = true
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    binding.tvStatus.text = "失败：${e.message}"
-                }
+                ui { setStatus("失败：${e.message}") }
             } finally {
-                withContext(Dispatchers.Main) {
-                    binding.progress.visibility = View.GONE
-                    binding.btnProcess.isEnabled = true
-                }
+                // 清掉临时文件，避免 cache 越积越大
+                try { inFile?.delete() } catch (_: Exception) {}
+                try { outFile?.delete() } catch (_: Exception) {}
+                setBusy(false)
             }
         }
+    }
+
+    private fun setBusy(busy: Boolean) {
+        ui {
+            if (_binding == null) return@ui
+            binding.progress.visibility = if (busy) View.VISIBLE else View.GONE
+            if (busy) {
+                binding.progress.isIndeterminate = true
+                binding.tvStatus.text = "处理中（端侧逐帧较慢，请耐心等待）…"
+            }
+            binding.btnProcess.isEnabled = !busy
+        }
+    }
+
+    private fun updateProgress(done: Int, total: Int) {
+        if (_binding == null) return
+        binding.progress.isIndeterminate = false
+        binding.progress.max = total.coerceAtLeast(1)
+        binding.progress.progress = done
+        binding.tvStatus.text = "端侧处理中 $done/$total"
+    }
+
+    private fun setStatus(msg: String) {
+        if (_binding != null) binding.tvStatus.text = msg
+    }
+
+    private fun ui(block: () -> Unit) {
+        val act = activity ?: return
+        act.runOnUiThread { if (isAdded) block() }
     }
 
     private fun save() {
         val data = resultBytes ?: return
         val ok = SaveUtils.saveVideo(requireContext(), data)
-        Toast.makeText(requireContext(), if (ok) "已保存到相册/MagicBeauty" else "保存失败", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            requireContext(),
+            if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     override fun onDestroyView() {
