@@ -8,11 +8,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: 设置 JDK 17
         uses: actions/setup-java@v4
@@ -20,19 +22,33 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
-        timeout-minutes: 20
-
-      - name: 接受许可并安装平台/构建工具
+      - name: 安装 Android SDK 组件
         timeout-minutes: 25
         run: |
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          yes | sdkmanager --licenses
-          for i in 1 2 3; do
-            sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" && break
-            echo "sdkmanager 第 $i 次失败，重试…"; sleep 15
-          done
+          set -e
+          SDK=/usr/local/lib/android/sdk
+          # 优先使用 runner 预装的 sdkmanager
+          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SM" ]; then
+            SM=$(ls "$SDK/cmdline-tools"/*/bin/sdkmanager 2>/dev/null | head -1)
+          fi
+          # 预装缺失时自行下载 command-line tools
+          if [ -z "$SM" ] || [ ! -x "$SM" ]; then
+            echo "预装 sdkmanager 未找到，自行下载 command-line tools ..."
+            mkdir -p /tmp/ct && cd /tmp/ct
+            curl --retry 3 --connect-timeout 30 -fsSL -o ct.zip \
+              https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q ct.zip -d "$SDK/cmdline-tools"
+            mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+            SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "使用 sdkmanager: $SM"
+          export ANDROID_SDK_ROOT=$SDK
+          export ANDROID_HOME=$SDK
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          yes | "$SM" --licenses >/dev/null
+          "$SM" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: 赋予 gradlew 执行权限
         run: chmod +x ./gradlew
