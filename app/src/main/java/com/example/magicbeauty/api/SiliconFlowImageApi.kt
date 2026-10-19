@@ -37,7 +37,7 @@ class SiliconFlowImageApi {
      */
     suspend fun generateHair(imageBytes: ByteArray, prompt: String): ByteArray =
         withContext(Dispatchers.IO) {
-            require(ApiConfig.siliconFlowKey.isNotBlank()) { "未配置 SiliconFlow 密钥，请在 secrets.properties 填写 SILICONFLOW_API_KEY" }
+            require(ApiConfig.siliconFlowKey.isNotBlank()) { "未配置硅基流动密钥，请到 App 底部「设置」页填写（注册 cloud.siliconflow.cn 获取 sk- 开头的 Key）" }
 
             val imagePart = MultipartBody.Part.createFormData(
                 "image", "input.png",
@@ -75,7 +75,7 @@ class SiliconFlowImageApi {
 
     /** 纯提示词生成（不传原图）。 */
     suspend fun generateByPrompt(prompt: String): ByteArray = withContext(Dispatchers.IO) {
-        require(ApiConfig.siliconFlowKey.isNotBlank()) { "未配置 SiliconFlow 密钥" }
+        require(ApiConfig.siliconFlowKey.isNotBlank()) { "未配置硅基流动密钥，请到 App 底部「设置」页填写" }
         val payload = gson.toJson(
             mapOf(
                 "model" to model,

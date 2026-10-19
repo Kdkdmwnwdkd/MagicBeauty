@@ -1,16 +1,17 @@
 package com.example.magicbeauty.api
 
-import com.example.magicbeauty.BuildConfig
+import com.example.magicbeauty.Prefs
 
 /**
- * API 配置。密钥来自 app/build.gradle.kts 注入的 BuildConfig 字段，
- * 真实值写在项目根目录 secrets.properties（已被 .gitignore，不会提交）。
- * 若为空字符串，调用对应功能时会直接抛错提示“未配置密钥”。
+ * API 配置。密钥在 App「设置」页填写，存于本机 SharedPreferences，不写在代码里，
+ * 方便无电脑的用户直接在手机上粘贴 key 使用。
  */
 object ApiConfig {
-    val tencentSecretId: String = BuildConfig.TENCENT_SECRET_ID
-    val tencentSecretKey: String = BuildConfig.TENCENT_SECRET_KEY
-    val siliconFlowKey: String = BuildConfig.SILICONFLOW_API_KEY
+    val tencentSecretId: String get() = ""
+    val tencentSecretKey: String get() = ""
+
+    // 硅基流动：从本机设置读取
+    val siliconFlowKey: String get() = Prefs.siliconFlowKey
 
     // 腾讯云人脸美颜 API 配置
     const val TENCENT_HOST = "iai.tencentcloudapi.com"
@@ -21,7 +22,9 @@ object ApiConfig {
     // 硅基流动（SiliconFlow）图像 API
     const val SILICONFLOW_URL = "https://api.siliconflow.cn/v1/images"
 
-    // 视频瘦身：没有通用的免费“视频瘦身”API，这里用可配置端点。
-    // 你可以填自己的云函数/服务端地址，或任意支持视频人像处理的厂商接口。
-    var videoSlimEndpoint: String = ""
+    // 视频瘦身：默认空 = 走端侧本地处理（免费离线）；
+    // 若填入你自己的云函数/服务端地址，则走云端处理。
+    var videoSlimEndpoint: String
+        get() = Prefs.videoSlimEndpoint
+        set(v) { Prefs.videoSlimEndpoint = v }
 }

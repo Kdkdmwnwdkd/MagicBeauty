@@ -8,14 +8,14 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="视频瘦身（云端 AI 处理）"
+        android:text="视频瘦身（手机本地处理）"
         android:textStyle="bold"
         android:textSize="16sp" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="视频逐帧人像塑形需云端处理。把你的云函数/厂商接口地址填到 ApiConfig.videoSlimEndpoint 即可。"
+        android:text="默认用手机本地 AI 逐帧瘦腰/拉腿，离线免费、不上传。如想更快/更精修，可到「设置」填云端瘦身终点。"
         android:textSize="12sp" />
 
     <Button

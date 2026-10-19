@@ -15,8 +15,26 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="把原图 + 描述发给云端图像大模型，生成飘逸发丝。需在 secrets.properties 配置 SILICONFLOW_API_KEY。"
+        android:text="云端生成：把原图+描述发给图像大模型，生成飘逸发丝（需填硅基流动 Key）。端侧染发：离线换发色，零成本托底。"
         android:textSize="12sp" />
+
+    <RadioGroup
+        android:id="@+id/rgMode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <RadioButton
+            android:id="@+id/rbCloud"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="云端生成"
+            android:checked="true" />
+        <RadioButton
+            android:id="@+id/rbLocal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="端侧染发" />
+    </RadioGroup>
 
     <Button
         android:id="@+id/btnPick"

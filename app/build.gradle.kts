@@ -1,15 +1,7 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("de.undercouch.download")
-}
-
-// 读取本地密钥（不提交到 git）。若不存在则用占位符，API 功能需自行填入。
-val secrets = Properties().apply {
-    val f = rootProject.file("secrets.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -25,11 +17,6 @@ android {
 
         // 仅保留常用 ABI，缩小包体
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
-
-        // 把密钥注入 BuildConfig，运行时读取
-        buildConfigField("String", "TENCENT_SECRET_ID", "\"${secrets.getProperty("TENCENT_SECRET_ID", "")}\"")
-        buildConfigField("String", "TENCENT_SECRET_KEY", "\"${secrets.getProperty("TENCENT_SECRET_KEY", "")}\"")
-        buildConfigField("String", "SILICONFLOW_API_KEY", "\"${secrets.getProperty("SILICONFLOW_API_KEY", "")}\"")
 
         vectorDrawables { useSupportLibrary = true }
     }

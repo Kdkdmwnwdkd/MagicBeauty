@@ -6,6 +6,7 @@ import androidx.fragment.app.Fragment
 import com.example.magicbeauty.databinding.ActivityMainBinding
 import com.example.magicbeauty.ui.HairFragment
 import com.example.magicbeauty.ui.PhotoEditorFragment
+import com.example.magicbeauty.ui.SettingsFragment
 import com.example.magicbeauty.ui.VideoSlimFragment
 
 class MainActivity : AppCompatActivity() {
@@ -24,6 +25,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_photo -> switchTo(PhotoEditorFragment(), R.id.nav_photo)
                 R.id.nav_video -> switchTo(VideoSlimFragment(), R.id.nav_video)
                 R.id.nav_hair -> switchTo(HairFragment(), R.id.nav_hair)
+                R.id.nav_settings -> switchTo(SettingsFragment(), R.id.nav_settings)
                 else -> false
             }
         }
