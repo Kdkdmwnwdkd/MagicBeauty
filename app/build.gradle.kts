@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("de.undercouch.download")
 }
 
 android {
@@ -39,25 +38,6 @@ android {
     // 不压缩 .task 模型文件，MediaPipe 需直接 mmap
     aaptOptions { noCompress += listOf("task") }
 }
-
-// 构建前自动下载 MediaPipe 模型到 assets（首次需联网；失败可手动放入，见 README）
-val modelDir = File(project.projectDir, "src/main/assets")
-val models = mapOf(
-    "face_landmarker.task" to
-        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-    "pose_landmarker_lite.task" to
-        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
-)
-
-val downloadTasks = models.map { (fileName, url) ->
-    tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadModel_$fileName") {
-        onlyIf { !File(modelDir, fileName).exists() }
-        src(url)
-        dest(File(modelDir, fileName))
-        overwrite(false)
-    }
-}
-tasks.named("preBuild") { dependsOn(downloadTasks) }
 
 dependencies {
     // 基础
