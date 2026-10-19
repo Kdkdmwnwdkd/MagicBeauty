@@ -72,15 +72,6 @@ class LocalVideoSlimEngine(private val context: Context) {
         decoder.start()
 
         val encoderColor = pickEncoderColor()
-        val encFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
-            setInteger(MediaFormat.KEY_BIT_RATE, (width * height * 4).coerceAtLeast(2_000_000))
-            setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, encoderColor)
-        }
-        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        encoder.configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        encoder.start()
 
         val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         if (rotation != 0) {
@@ -102,6 +93,8 @@ class LocalVideoSlimEngine(private val context: Context) {
         val totalFrames = estimateFrames(format, frameRate)
 
         var audioSource: AudioSource? = null
+        // 编码器按第一帧处理后的实际尺寸懒创建，保证与位图尺寸严格一致
+        var encoder: MediaCodec? = null
 
         try {
             // 音频轨要在 muxer.start() 之前 addTrack，所以先准备好
@@ -139,14 +132,17 @@ class LocalVideoSlimEngine(private val context: Context) {
                                 if (frameNo % 10 == 0) {
                                     try { guide = mp.analyze(bmp) } catch (_: Exception) {}
                                 }
-                                // 关键：保持原始分辨率，否则输出位图与编码器尺寸不一致
-                                engine.setSource(bmp, maxOf(width, height))
+                                // 限制处理分辨率：4K 逐帧位图会 OOM（手机端没必要按 4K 处理）
+                                engine.setSource(bmp, PROCESS_MAX_DIM)
                                 val out = engine.render(params, guide)
+                                val enc = encoder ?: createEncoder(
+                                    out.width, out.height, frameRate, encoderColor
+                                ).also { encoder = it }
                                 // PTS 兜底：个别容器时间戳缺失/重复，muxer 会拒绝非单调时间戳
                                 var pts = dInfo.presentationTimeUs
                                 if (pts <= lastPts) pts = lastPts + 33_333L
                                 lastPts = pts
-                                feedEncoder(encoder, out, pts, eInfo, muxer, state, encoderColor)
+                                feedEncoder(enc, out, pts, eInfo, muxer, state, encoderColor)
                                 frameNo++
                                 if (frameNo % 5 == 0) {
                                     onProgress(frameNo.coerceAtMost(totalFrames), totalFrames)
@@ -160,11 +156,13 @@ class LocalVideoSlimEngine(private val context: Context) {
             }
 
             // ByteBuffer 输入的编码器：必须自己塞 EOS
-            val eosIdx = encoder.dequeueInputBuffer(10_000)
-            if (eosIdx >= 0) {
-                encoder.queueInputBuffer(eosIdx, 0, 0, lastPts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            encoder?.let { enc ->
+                val eosIdx = enc.dequeueInputBuffer(10_000)
+                if (eosIdx >= 0) {
+                    enc.queueInputBuffer(eosIdx, 0, 0, lastPts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                }
+                drainEncoder(enc, eInfo, muxer, state, untilEos = true)
             }
-            drainEncoder(encoder, eInfo, muxer, state, untilEos = true)
 
             // 透传音频
             audioSource?.let { copyAudio(it, muxer, state) }
@@ -174,8 +172,8 @@ class LocalVideoSlimEngine(private val context: Context) {
         } finally {
             try { decoder.stop() } catch (_: Exception) {}
             try { decoder.release() } catch (_: Exception) {}
-            try { encoder.stop() } catch (_: Exception) {}
-            try { encoder.release() } catch (_: Exception) {}
+            try { encoder?.stop() } catch (_: Exception) {}
+            try { encoder?.release() } catch (_: Exception) {}
             try { reader.close() } catch (_: Exception) {}
             try { extractor.release() } catch (_: Exception) {}
             try { mp.close() } catch (_: Exception) {}
@@ -448,6 +446,24 @@ class LocalVideoSlimEngine(private val context: Context) {
     }
 
     private data class MuxerState(var started: Boolean = false, var videoTrack: Int = -1)
+
+    private fun createEncoder(w: Int, h: Int, frameRate: Int, color: Int): MediaCodec {
+        val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
+            setInteger(MediaFormat.KEY_BIT_RATE, (w * h * 4).coerceAtLeast(2_000_000))
+            setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, color)
+        }
+        val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        enc.start()
+        return enc
+    }
+
+    private companion object {
+        /** 逐帧处理的分辨率上限，防止 4K 视频把内存打爆 */
+        const val PROCESS_MAX_DIM = 1920
+    }
 
     private fun estimateFrames(format: MediaFormat, frameRate: Int): Int {
         val dur = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
