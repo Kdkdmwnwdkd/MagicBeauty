@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="本地修图（不上传、不耗API）"
+            android:textStyle="bold"
+            android:textSize="16sp" />
+
+        <ImageView
+            android:id="@+id/preview"
+            android:layout_width="match_parent"
+            android:layout_height="320dp"
+            android:scaleType="fitCenter"
+            android:background="#22000000" />
+
+        <ProgressBar
+            android:id="@+id/progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnPick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="选择图片" />
+
+        <!-- 10 个调节滑块，id 唯一 -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="亮度" />
+        <SeekBar android:id="@+id/sbBrightness" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="对比度" />
+        <SeekBar android:id="@+id/sbContrast" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="饱和度" />
+        <SeekBar android:id="@+id/sbSaturation" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="冷暖" />
+        <SeekBar android:id="@+id/sbWarmth" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="磨皮" />
+        <SeekBar android:id="@+id/sbBlur" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="暗角" />
+        <SeekBar android:id="@+id/sbVignette" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="瘦脸" />
+        <SeekBar android:id="@+id/sbThinFace" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="大眼" />
+        <SeekBar android:id="@+id/sbEye" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="瘦腰" />
+        <SeekBar android:id="@+id/sbWaist" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="拉腿/调身高" />
+        <SeekBar android:id="@+id/sbLeg" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
+
+        <Button
+            android:id="@+id/btnSave"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="保存到相册"
+            android:enabled="false" />
+
+    </LinearLayout>
+</ScrollView>
