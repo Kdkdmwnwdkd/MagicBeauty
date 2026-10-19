@@ -25,7 +25,7 @@ object SaveUtils {
         var os: OutputStream? = null
         return try {
             os = resolver.openOutputStream(uri)
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, os!!)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 values.clear()
                 values.put(MediaStore.Images.Media.IS_PENDING, 0)

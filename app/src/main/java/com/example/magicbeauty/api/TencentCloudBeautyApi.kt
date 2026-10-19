@@ -10,7 +10,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import java.security.Spec.EncodedKeySpec
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import java.text.SimpleDateFormat
@@ -110,6 +109,9 @@ class TencentCloudBeautyApi {
 
     private fun hmacSHA256(key: String, data: String): ByteArray =
         hmacSHA256(key.toByteArray(StandardCharsets.UTF_8), data.toByteArray(StandardCharsets.UTF_8))
+
+    private fun hmacSHA256(key: ByteArray, data: String): ByteArray =
+        hmacSHA256(key, data.toByteArray(StandardCharsets.UTF_8))
 
     private fun hmacSHA256(key: ByteArray, data: ByteArray): ByteArray {
         val mac = Mac.getInstance("HmacSHA256")

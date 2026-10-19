@@ -67,8 +67,8 @@ class MediaPipeHelper(context: Context) {
 
         try {
             val poseRes = poseLandmarker.detect(mpImage)
-            if (poseRes.poseLandmarks().isNotEmpty()) {
-                val p = poseRes.poseLandmarks()[0]
+            if (poseRes.landmarks().isNotEmpty()) {
+                val p = poseRes.landmarks()[0]
                 val shoulderX = mid(p[11], p[12]).x
                 val hip = mid(p[23], p[24])
                 val ankle = mid(p[27], p[28])

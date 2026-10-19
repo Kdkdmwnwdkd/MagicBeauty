@@ -67,7 +67,7 @@ class LocalVideoSlimEngine(private val context: Context) {
         // 编码：H.264，ByteBuffer(NV12) 输入
         val encColor = pickEncoderColor()
         val encFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
-            setInteger(MediaFormat.KEY_BITRATE, (width * height * 4).coerceAtLeast(2_000_000))
+            setInteger(MediaFormat.KEY_BIT_RATE, (width * height * 4).coerceAtLeast(2_000_000))
             setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             setInteger(MediaFormat.KEY_COLOR_FORMAT, encColor)
