@@ -142,8 +142,11 @@ class LocalVideoSlimEngine(private val context: Context) {
                                 // 关键：保持原始分辨率，否则输出位图与编码器尺寸不一致
                                 engine.setSource(bmp, maxOf(width, height))
                                 val out = engine.render(params, guide)
-                                lastPts = dInfo.presentationTimeUs
-                                feedEncoder(encoder, out, lastPts, eInfo, muxer, state, encoderColor)
+                                // PTS 兜底：个别容器时间戳缺失/重复，muxer 会拒绝非单调时间戳
+                                var pts = dInfo.presentationTimeUs
+                                if (pts <= lastPts) pts = lastPts + 33_333L
+                                lastPts = pts
+                                feedEncoder(encoder, out, pts, eInfo, muxer, state, encoderColor)
                                 frameNo++
                                 if (frameNo % 5 == 0) {
                                     onProgress(frameNo.coerceAtMost(totalFrames), totalFrames)

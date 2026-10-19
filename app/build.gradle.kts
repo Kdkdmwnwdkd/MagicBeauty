@@ -36,7 +36,7 @@ android {
     buildFeatures { viewBinding = true }
 
     // MediaPipe 需要直接 mmap 模型文件，.task / .tflite 都不能压缩
-    androidResources { noCompress += listOf("task", "tflite") }
+    androidResources { noCompress.addAll(listOf("task", "tflite")) }
 }
 
 dependencies {
