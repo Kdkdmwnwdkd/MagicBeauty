@@ -22,6 +22,9 @@ class MediaPipeHelper(context: Context) {
     /** 衣服下沿分析（判断裙子/短裤/长裤），只在照片分析时启用，视频逐帧太慢 */
     private val clothingAnalyzer = ClothingAnalyzer(context)
 
+    /** 更细的人体解析（LIP 20 类），优先使用；失败再回退到 6 类分割 */
+    private val humanParsing = HumanParsingAnalyzer(context)
+
     private var faceCreated = false
     private var poseCreated = false
 
@@ -126,8 +129,22 @@ class MediaPipeHelper(context: Context) {
             }
         } catch (_: Exception) { /* 保留默认 */ }
 
-        // 衣服下沿：区分裙子/短裤（下摆在小腿或大腿）和长裤（贴脚踝）
+        // 衣服下沿：先用 LIP 20 类人体解析（裙/裤/袜/鞋分得清），失败再回退 6 类分割
         if (withClothing && guide.hasPose) {
+            try {
+                val hp = humanParsing.analyze(bitmap, guide)
+                if (hp != null) {
+                    guide = guide.copy(
+                        clothesHemY = hp.hemY,
+                        clothesHalfW = hp.hemHalfW,
+                        clothesIsPants = hp.isPants,
+                        clothesEdgeLift = hp.edgeLift,
+                        hasClothes = true
+                    )
+                    return guide
+                }
+            } catch (_: Exception) { /* 继续回退 */ }
+
             try {
                 clothingAnalyzer.analyze(bitmap, guide)?.let { c ->
                     guide = guide.copy(
@@ -149,6 +166,7 @@ class MediaPipeHelper(context: Context) {
         if (faceCreated) try { faceLandmarker.close() } catch (_: Exception) {}
         if (poseCreated) try { poseLandmarker.close() } catch (_: Exception) {}
         try { clothingAnalyzer.close() } catch (_: Exception) {}
+        try { humanParsing.close() } catch (_: Exception) {}
     }
 
     private fun mid(a: com.google.mediapipe.tasks.components.containers.NormalizedLandmark,

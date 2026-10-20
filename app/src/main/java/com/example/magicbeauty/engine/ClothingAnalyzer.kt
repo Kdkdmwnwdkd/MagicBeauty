@@ -129,7 +129,10 @@ class ClothingAnalyzer(context: Context) {
             var lift = ((centerHem - if (edgeHem >= 0) edgeHem else centerHem).toFloat()) / mh
             lift = lift.coerceIn(0f, 0.10f)
 
-            val hemRow = centerHem
+            // 用原图的水平边缘精修裙摆线：
+            // 256×256 的粗分割只能给到 ±几像素（换算回原图是几十像素），
+            // 而“衣服→皮肤/背景”是一条真实存在的强边缘，直接在原图上找它最准。
+            val hemRow = refineHemRow(bitmap, centerHem, mh, x0, x1, mw)
 
             // 裙摆 / 裤脚宽度：在衣服下沿上方几行取左右最外沿
             var left = mw
@@ -161,6 +164,47 @@ class ClothingAnalyzer(context: Context) {
         } finally {
             try { mpImage.close() } catch (_: Exception) {}
         }
+    }
+
+    /**
+     * 在粗分割给出的下沿附近 ±5% 画面高内，找“水平边缘最强”的一行作为真实裙摆线。
+     * 只做只读采样，带步长，1920 宽的照片大约几毫秒。
+     */
+    private fun refineHemRow(bitmap: Bitmap, hemRowMask: Int, mh: Int,
+                             x0m: Int, x1m: Int, mw: Int): Int {
+        val bw = bitmap.width
+        val bh = bitmap.height
+        if (bw < 16 || bh < 16 || mw <= 0) return hemRowMask
+        val yc = (hemRowMask.toFloat() / mh * bh).toInt().coerceIn(1, bh - 2)
+        val half = (bh * 0.05f).toInt().coerceIn(3, bh / 8)
+        val xa = (x0m.toFloat() / mw * bw).toInt().coerceIn(0, bw - 1)
+        val xb = (x1m.toFloat() / mw * bw).toInt().coerceIn(0, bw - 1)
+        if (xb - xa < 12) return hemRowMask
+
+        val step = ((xb - xa) / 120).coerceAtLeast(1)
+        var bestY = yc
+        var bestE = -1.0
+        val from = (yc - half).coerceAtLeast(1)
+        val to = (yc + half).coerceAtMost(bh - 2)
+        for (y in from..to) {
+            var e = 0.0
+            var x = xa
+            while (x <= xb) {
+                val c1 = bitmap.getPixel(x, y + 1)
+                val c0 = bitmap.getPixel(x, y - 1)
+                val dr = ((c1 shr 16 and 0xff) - (c0 shr 16 and 0xff))
+                val dg = ((c1 shr 8 and 0xff) - (c0 shr 8 and 0xff))
+                val db = ((c1 and 0xff) - (c0 and 0xff))
+                e += kotlin.math.abs(dr) * 0.299 + kotlin.math.abs(dg) * 0.587 +
+                        kotlin.math.abs(db) * 0.114
+                x += step
+            }
+            if (e > bestE) {
+                bestE = e
+                bestY = y
+            }
+        }
+        return (bestY.toFloat() / bh * mh).toInt().coerceIn(0, mh - 1)
     }
 
     /** 取指定列范围内有效行的中位数 */

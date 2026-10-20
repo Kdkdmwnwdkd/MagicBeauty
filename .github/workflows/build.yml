@@ -63,6 +63,28 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      - name: 下载人体解析模型（LIP 20 类，约 68MB）
+        timeout-minutes: 20
+        run: |
+          set -e
+          mkdir -p app/src/main/assets
+          OUT=app/src/main/assets/human_parsing.onnx
+          if [ -f "$OUT" ] && [ "$(stat -c%s "$OUT")" -gt 50000000 ]; then
+            echo "模型已存在，跳过下载"
+          else
+            for i in 1 2 3; do
+              echo "第 $i 次尝试下载 ..."
+              if curl -L --retry 3 --retry-delay 5 --connect-timeout 40 --max-time 1200 \
+                "https://hf-mirror.com/pirocheto/schp-lip-20/resolve/main/onnx/schp-lip-20-int8-static.onnx" \
+                -o "$OUT"; then
+                break
+              fi
+              sleep 5
+            done
+          fi
+          ls -lh "$OUT"
+          test "$(stat -c%s "$OUT")" -gt 50000000
+
       - name: 编译 Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 

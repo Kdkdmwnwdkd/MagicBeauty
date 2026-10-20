@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.magicbeauty"
         minSdk = 24
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.8.1"
+        versionCode = 15
+        versionName = "2.0.0"
 
         // 仅保留常用 ABI，缩小包体
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -51,6 +51,9 @@ dependencies {
 
     // MediaPipe（本地人脸/人体关键点，开源免费）
     implementation("com.google.mediapipe:tasks-vision:0.10.29")
+
+    // ONNX Runtime：跑人体解析（LIP 20 类：裙/裤/袜/鞋分开），比 6 类分割细得多
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
 
     // 协程（API 异步）
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
