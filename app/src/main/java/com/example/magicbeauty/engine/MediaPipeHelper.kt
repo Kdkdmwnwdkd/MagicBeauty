@@ -88,8 +88,12 @@ class MediaPipeHelper(context: Context) {
                 val ankle = mid(p[27], p[28])
                 // 腰在胯之上：取肩胯连线上、靠胯 25% 的位置（原来直接用胯，位置偏低）
                 val waistYImg = hip.y - 0.25f * (hip.y - shoulder.y)
-                // 腰宽约等于肩宽的 0.4 倍（肩宽 / 2 是半肩宽，再乘 0.8）
-                val halfW = dist(p[11], p[12]) * 0.40f
+                // 半身宽取「胯宽」和「肩宽一半」里较大的那个：
+                // 拉腿的横向权重靠它定范围，取窄了会把裙摆/阔腿裤的边缘留在原地，
+                // 看起来就是“身体上去了、裙子还拖在下面”。
+                val hipHalf = dist(p[23], p[24]) / 2f
+                val shoulderHalf = dist(p[11], p[12]) * 0.50f
+                val halfW = maxOf(hipHalf, shoulderHalf)
                 guide = guide.copy(
                     bodyCenter = WarpGuide.toGL(hip.x, waistYImg),
                     bodyHalfW = halfW.coerceIn(0.05f, 0.35f),

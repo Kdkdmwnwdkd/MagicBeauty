@@ -40,7 +40,14 @@ object Filters {
         val b0 = (a * LR) * gainB * contrast
         val b1 = (a * LG) * gainB * contrast
         val b2 = (a * LB + sat) * gainB * contrast
-        val m = floatArrayOf(r0, r1, r2, g0, g1, g2, b0, b1, b2)
+        // 行主序 -> 列主序。GLES2 的 glUniformMatrix3fv 只接受 transpose=false，
+        // 也就是必须自己按列排好；直接传行主序会让矩阵被“转置”，
+        // 黑白滤镜会变成绿色（三行相同 → 转置后每列恒定）。
+        val m = floatArrayOf(
+            r0, g0, b0,
+            r1, g1, b1,
+            r2, g2, b2
+        )
         // 对比度带来的 0.5 偏移要补回来，再叠加提亮
         val k = (1f - contrast) * 0.5f
         val off = floatArrayOf(k + lift, k + lift, k + lift)

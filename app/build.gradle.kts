@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.magicbeauty"
         minSdk = 24
         targetSdk = 34
-        versionCode = 9
-        versionName = "1.6.0"
+        versionCode = 10
+        versionName = "1.7.0"
 
         // 仅保留常用 ABI，缩小包体
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -46,6 +46,7 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.coordinatorlayout:coordinatorlayout:1.2.0")
+    implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
 
     // MediaPipe（本地人脸/人体关键点，开源免费）

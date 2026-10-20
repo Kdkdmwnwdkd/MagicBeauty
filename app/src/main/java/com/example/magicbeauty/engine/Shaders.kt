@@ -85,7 +85,7 @@ object Shaders {
                 // 超高斯横向权重：身体范围内 ≈1，到 2.2 倍半宽处基本为 0，
                 // 这样人体被完整拉伸，旁边的门/墙角保持不动。
                 float dxb = abs(uv.x - uBodyCenter.x) / max(uBodyHalfW, 0.02);
-                float wx = exp(-pow(dxb / 1.8, 4.0));
+                float wx = exp(-pow(dxb / 2.4, 4.0));
                 y = mix(uv.y, y, wx);
                 uv.y = y;
             }
