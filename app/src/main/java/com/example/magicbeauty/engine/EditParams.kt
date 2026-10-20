@@ -41,6 +41,15 @@ data class WarpGuide(
     /** 腿段上界：优先用膝盖（这样裙子/长上衣只会整体上移，不会被拉长） */
     val legTopY: Float = 0.35f,
     val ankleY: Float = 0.05f,
+    /** 衣服下沿（GL 坐标）——拉腿的起点；裙子/短裤用它，长裤会用胯 */
+    val clothesHemY: Float = 0f,
+    /** 衣服下沿处的半宽（裙摆宽度），拉腿的横向作用范围 */
+    val clothesHalfW: Float = 0f,
+    val hasClothes: Boolean = false,
+    /** 长裤（下沿贴脚踝）：可以拉整条腿，衣服不会变形 */
+    val clothesIsPants: Boolean = false,
+    /** 大眼强度的自适应系数：眼睛小就多给一点，眼睛大就少给一点 */
+    val eyeGain: Float = 1f,
     // 是否真的检测到人脸/人体。没检测到就不能拿默认坐标硬套，
     // 否则“瘦脸/大眼”会落在画面中央（用户看到的就是“没对准脸”）。
     val hasFace: Boolean = false,

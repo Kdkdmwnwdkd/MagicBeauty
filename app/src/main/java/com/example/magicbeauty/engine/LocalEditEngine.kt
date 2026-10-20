@@ -133,12 +133,26 @@ class LocalEditEngine {
 
         // 统一在这里做“没检测到就不变形”的兜底，视频/照片两条链路都不会再把效果套到画面中央。
         // 另外：腿没拍全（胯到脚踝太短）时不做拉腿，否则会把上半身整体顶出画面。
-        // 腿段上界现在是「膝盖」（没有膝盖才退回胯），所以跨度判断放到 0.06
-        val legOk = guide.hasPose && (guide.legTopY - guide.ankleY) > 0.06f && guide.ankleY > 0.02f
+        // 拉腿起点按衣服类型决定：
+        //   · 长裤（衣服贴到脚踝）→ 从胯开始拉整条腿，裤子本来贴着腿，跟着变长是自然的；
+        //   · 裙子/短裤（下摆在大腿或小腿）→ 从下摆开始拉，裙摆只整体上移、长度不变；
+        //   · 没有衣服信息 → 退回膝盖。
+        val hemOk = guide.hasClothes && (guide.clothesHemY - guide.ankleY) > 0.04f
+        val legTop = when {
+            guide.hasClothes && guide.clothesIsPants -> guide.hipY
+            hemOk -> guide.clothesHemY
+            else -> guide.legTopY
+        }
+        // 横向作用半径：裙子用裙摆宽度，这样裙摆整体一起上移；其它用身体半宽
+        val legHalfW = if (guide.hasClothes && !guide.clothesIsPants && guide.clothesHalfW > 0.05f)
+            guide.clothesHalfW else guide.bodyHalfW
+
+        val legOk = guide.hasPose && (legTop - guide.ankleY) > 0.05f && guide.ankleY > 0.02f
         val waistOk = guide.hasPose && guide.bodyHalfW > 0.03f
         val eff = params.copy(
             thinFace = if (guide.hasFace) params.thinFace else 0f,
-            eyeEnlarge = if (guide.hasFace) params.eyeEnlarge else 0f,
+            eyeEnlarge = if (guide.hasFace)
+                (params.eyeEnlarge * guide.eyeGain).coerceIn(0f, 0.40f) else 0f,
             waistSlim = if (waistOk) params.waistSlim else 0f,
             legStretch = if (legOk) params.legStretch else 0f
         )
@@ -166,7 +180,8 @@ class LocalEditEngine {
         f(warpProg, "uBodyHalfW", guide.bodyHalfW)
         f(warpProg, "uWaistY", guide.waistY)
         f(warpProg, "uWaistSlim", eff.waistSlim)
-        f(warpProg, "uHipY", guide.legTopY)
+        f(warpProg, "uHipY", if (legOk) legTop else guide.hipY)
+        f(warpProg, "uLegHalfW", legHalfW)
         f(warpProg, "uAnkleY", guide.ankleY)
         f(warpProg, "uLegStretch", eff.legStretch)
         drawQuad()

@@ -131,7 +131,7 @@ class LocalVideoSlimEngine(private val context: Context) {
                                 val bmp = yuvToBitmap(image)
                                 // 关键点变化很慢，每 15 帧更新一次即可，减少推理耗时
                                 if (frameNo % 15 == 0) {
-                                    val g = try { mp.analyze(bmp) } catch (_: Exception) { null }
+                                    val g = try { mp.analyze(bmp, withClothing = false) } catch (_: Exception) { null }
                                     // 只有真检测到人体才更新，避免偶尔一帧失败就把效果打回画面中央
                                     if (g != null && g.hasPose) guide = g
                                 }

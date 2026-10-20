@@ -19,6 +19,9 @@ class MediaPipeHelper(context: Context) {
 
     private val appContext = context.applicationContext
 
+    /** 衣服下沿分析（判断裙子/短裤/长裤），只在照片分析时启用，视频逐帧太慢 */
+    private val clothingAnalyzer = ClothingAnalyzer(context)
+
     private var faceCreated = false
     private var poseCreated = false
 
@@ -50,8 +53,11 @@ class MediaPipeHelper(context: Context) {
         PoseLandmarker.createFromOptions(appContext, opt)
     }
 
-    /** 分析一张图，返回形变引导。检测失败则返回默认（无形变）。 */
-    fun analyze(bitmap: Bitmap): WarpGuide {
+    /**
+     * 分析一张图，返回形变引导。检测失败则返回默认（无形变）。
+     * @param withClothing 是否做衣服分割（照片用 true；视频逐帧用 false 省时间）
+     */
+    fun analyze(bitmap: Bitmap, withClothing: Boolean = true): WarpGuide {
         val mpImage: MPImage = BitmapImageBuilder(bitmap).build()
         var guide = WarpGuide()
         // uv 是按宽高各自归一化的，算距离/半径时要换算到同一尺度（以图片高度为单位）
@@ -67,13 +73,19 @@ class MediaPipeHelper(context: Context) {
                 val eyeDx = (lm[33].x() - lm[133].x()) * aspect
                 val eyeDy = lm[33].y() - lm[133].y()
                 val eyeW = kotlin.math.sqrt(eyeDx * eyeDx + eyeDy * eyeDy)
+                // 眼睛相对于脸的大小：小眼睛多放大一点，大眼睛少放大一点，
+                // 避免“本来眼睛就大”的人一拉就变成瞪眼。
+                val faceW = (halfW * 2f * aspect).coerceAtLeast(0.02f)
+                val eyeRatio = (eyeW / faceW).coerceIn(0.06f, 0.40f)
+                val eyeGain = (0.17f / eyeRatio).coerceIn(0.55f, 1.30f)
                 guide = guide.copy(
                     faceCenter = WarpGuide.toGL(center.x, center.y),
                     faceHalfW = halfW.coerceIn(0.04f, 0.30f),
                     faceHalfH = (kotlin.math.abs(lm[10].y() - lm[152].y()) / 2f).coerceIn(0.04f, 0.35f),
                     eyeL = WarpGuide.toGL(mid(lm[33], lm[133]).x, mid(lm[33], lm[133]).y),
                     eyeR = WarpGuide.toGL(mid(lm[263], lm[362]).x, mid(lm[263], lm[362]).y),
-                    eyeRadius = (eyeW * 1.35f).coerceIn(0.02f, 0.12f),
+                    eyeRadius = (eyeW * 1.30f).coerceIn(0.02f, 0.12f),
+                    eyeGain = eyeGain,
                     hasFace = true
                 )
             }
@@ -114,6 +126,20 @@ class MediaPipeHelper(context: Context) {
             }
         } catch (_: Exception) { /* 保留默认 */ }
 
+        // 衣服下沿：区分裙子/短裤（下摆在小腿或大腿）和长裤（贴脚踝）
+        if (withClothing && guide.hasPose) {
+            try {
+                clothingAnalyzer.analyze(bitmap, guide)?.let { c ->
+                    guide = guide.copy(
+                        clothesHemY = c.hemY,
+                        clothesHalfW = c.hemHalfW,
+                        clothesIsPants = c.isPants,
+                        hasClothes = true
+                    )
+                }
+            } catch (_: Exception) { /* 分割失败就用膝盖兜底 */ }
+        }
+
         return guide
     }
 
@@ -121,6 +147,7 @@ class MediaPipeHelper(context: Context) {
         // 只关已经真正创建过的，避免 close() 反过来把 lazy 模型加载一遍
         if (faceCreated) try { faceLandmarker.close() } catch (_: Exception) {}
         if (poseCreated) try { poseLandmarker.close() } catch (_: Exception) {}
+        try { clothingAnalyzer.close() } catch (_: Exception) {}
     }
 
     private fun mid(a: com.google.mediapipe.tasks.components.containers.NormalizedLandmark,

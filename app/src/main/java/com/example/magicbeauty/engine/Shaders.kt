@@ -48,7 +48,8 @@ object Shaders {
         uniform float uBodyHalfW;    // 半腰宽（按图片宽度归一化）
         uniform float uWaistY;       // 腰线
         uniform float uWaistSlim;    // 0..1 瘦腰
-        uniform float uHipY;         // 腿段上界（有膝盖时=膝盖，否则=胯）
+        uniform float uHipY;         // 腿段上界（裙子=裙摆下沿 / 长裤=胯 / 兜底=膝盖）
+        uniform float uLegHalfW;     // 拉腿的横向作用半径（裙子用裙摆半宽）
         uniform float uAnkleY;       // 脚踝（腿段下界）
         uniform float uLegStretch;   // 0..0.18 拉腿
 
@@ -84,7 +85,7 @@ object Shaders {
                 }
                 // 超高斯横向权重：身体范围内 ≈1，到 2.2 倍半宽处基本为 0，
                 // 这样人体被完整拉伸，旁边的门/墙角保持不动。
-                float dxb = abs(uv.x - uBodyCenter.x) / max(uBodyHalfW, 0.02);
+                float dxb = abs(uv.x - uBodyCenter.x) / max(uLegHalfW, 0.02);
                 float wx = exp(-pow(dxb / 2.4, 4.0));
                 y = mix(uv.y, y, wx);
                 uv.y = y;
