@@ -36,7 +36,11 @@ data class WarpGuide(
     val bodyHalfW: Float = 0.18f,
     val waistY: Float = 0.45f,
     val hipY: Float = 0.35f,
-    val ankleY: Float = 0.05f
+    val ankleY: Float = 0.05f,
+    // 是否真的检测到人脸/人体。没检测到就不能拿默认坐标硬套，
+    // 否则“瘦脸/大眼”会落在画面中央（用户看到的就是“没对准脸”）。
+    val hasFace: Boolean = false,
+    val hasPose: Boolean = false
 ) {
     companion object {
         // MediaPipe 归一化坐标(y 向下) -> GL 坐标(y 向上)

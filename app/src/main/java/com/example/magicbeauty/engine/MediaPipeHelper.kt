@@ -63,7 +63,8 @@ class MediaPipeHelper(context: Context) {
                     faceHalfH = kotlin.math.abs(lm[10].y() - lm[152].y()) / 2f,
                     eyeL = WarpGuide.toGL(mid(lm[33], lm[133]).x, mid(lm[33], lm[133]).y),
                     eyeR = WarpGuide.toGL(mid(lm[263], lm[362]).x, mid(lm[263], lm[362]).y),
-                    eyeRadius = dist(lm[33], lm[133]) * 1.6f
+                    eyeRadius = dist(lm[33], lm[133]) * 1.6f,
+                    hasFace = true
                 )
             }
         } catch (_: Exception) { /* 保留默认 */ }
@@ -81,7 +82,8 @@ class MediaPipeHelper(context: Context) {
                     bodyHalfW = dist(p[11], p[12]) / 2f,
                     waistY = 1f - hip.y,         // 腰部 ≈ 胯部上沿
                     hipY = 1f - hip.y,
-                    ankleY = 1f - ankle.y
+                    ankleY = 1f - ankle.y,
+                    hasPose = true
                 )
             }
         } catch (_: Exception) { /* 保留默认 */ }

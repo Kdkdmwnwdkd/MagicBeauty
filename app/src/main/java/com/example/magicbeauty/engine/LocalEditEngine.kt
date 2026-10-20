@@ -231,6 +231,14 @@ class LocalEditEngine {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
         val pixels = IntArray(bmp.width * bmp.height)
         bmp.getPixels(pixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+        // Android 的 ARGB int 在内存里是小端 B,G,R,A；直接按 GL_RGBA 上传会红蓝互换。
+        // 这里先交换 R/B，上传后颜色才正确（红色不会再变蓝）。
+        for (i in pixels.indices) {
+            val p = pixels[i]
+            pixels[i] = (p and 0xFF00FF00.toInt()) or
+                    ((p and 0x00FF0000) shr 16) or
+                    ((p and 0x000000FF) shl 16)
+        }
         val need = pixels.size * 4
         val buf = uploadBuf?.takeIf { it.capacity() >= need }
             ?: ByteBuffer.allocateDirect(need).order(ByteOrder.nativeOrder()).also { uploadBuf = it }

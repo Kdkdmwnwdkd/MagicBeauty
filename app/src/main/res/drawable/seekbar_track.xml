@@ -1,18 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@android:id/background">
+    <!-- 用上下 inset 把轨道压细，避免被 SeekBar 拉到 30dp 高变成“粗紫条” -->
+    <item
+        android:id="@android:id/background"
+        android:bottom="12dp"
+        android:top="12dp">
         <shape android:shape="rectangle">
             <corners android:radius="3dp" />
             <solid android:color="#2A2D42" />
-            <size android:height="5dp" />
         </shape>
     </item>
-    <item android:id="@android:id/progress">
+    <item
+        android:id="@android:id/progress"
+        android:bottom="12dp"
+        android:top="12dp">
         <clip>
             <shape android:shape="rectangle">
                 <corners android:radius="3dp" />
                 <solid android:color="@color/brand" />
-                <size android:height="5dp" />
             </shape>
         </clip>
     </item>

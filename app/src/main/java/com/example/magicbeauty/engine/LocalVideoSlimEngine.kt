@@ -131,11 +131,15 @@ class LocalVideoSlimEngine(private val context: Context) {
                                 val bmp = yuvToBitmap(image)
                                 // 关键点变化很慢，每 15 帧更新一次即可，减少推理耗时
                                 if (frameNo % 15 == 0) {
-                                    try { guide = mp.analyze(bmp) } catch (_: Exception) {}
+                                    val g = try { mp.analyze(bmp) } catch (_: Exception) { null }
+                                    // 只有真检测到人体才更新，避免偶尔一帧失败就把效果打回画面中央
+                                    if (g != null && g.hasPose) guide = g
                                 }
                                 // 限制处理分辨率：4K 逐帧位图会 OOM（手机端没必要按 4K 处理）
                                 engine.setSource(bmp, PROCESS_MAX_DIM)
-                                val out = engine.render(params, guide)
+                                val effective = if (guide.hasPose) params
+                                else params.copy(waistSlim = 0f, legStretch = 0f)
+                                val out = engine.render(effective, guide)
                                 val enc = encoder ?: createEncoder(
                                     out.width, out.height, frameRate, encoderColor
                                 ).also { encoder = it }

@@ -103,6 +103,15 @@
             android:visibility="gone" />
     </FrameLayout>
 
+    <TextView
+        android:id="@+id/tvHint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textColor="@color/text_dim"
+        android:textSize="11sp"
+        android:visibility="gone" />
+
     <!-- 选择 / 保存 -->
     <LinearLayout
         android:layout_width="match_parent"

@@ -113,7 +113,23 @@ class PhotoEditorFragment : Fragment() {
             guide = pair.second
             if (_binding == null) return@launch
             binding.btnSave.isEnabled = true
+            updateDetectHint()
             renderPreview()
+        }
+    }
+
+    /** 没检测到人脸/人体时，明确告诉用户哪几个功能不会生效，而不是把效果套在画面中央。 */
+    private fun updateDetectHint() {
+        if (_binding == null) return
+        val missing = ArrayList<String>(2)
+        if (!guide.hasFace) missing.add("人脸")
+        if (!guide.hasPose) missing.add("人体")
+        if (missing.isEmpty()) {
+            binding.tvHint.visibility = View.GONE
+        } else {
+            binding.tvHint.text = "未识别到${missing.joinToString("、")}：" +
+                    "对应的瘦脸/大眼/瘦腰/拉腿不会生效（正脸、全身照效果最好）"
+            binding.tvHint.visibility = View.VISIBLE
         }
     }
 
@@ -128,7 +144,14 @@ class PhotoEditorFragment : Fragment() {
         renderJob = lifecycleScope.launch {
             try {
                 val g = guide
-                val out = withContext(glDispatcher) { engine.render(params, g) }
+                // 关键：没检测到就不硬套默认坐标，否则效果会落在画面中央而不是脸上
+                val effective = params.copy(
+                    thinFace = if (g.hasFace) params.thinFace else 0f,
+                    eyeEnlarge = if (g.hasFace) params.eyeEnlarge else 0f,
+                    waistSlim = if (g.hasPose) params.waistSlim else 0f,
+                    legStretch = if (g.hasPose) params.legStretch else 0f
+                )
+                val out = withContext(glDispatcher) { engine.render(effective, g) }
                 if (_binding == null || !isAdded) return@launch
                 // 不要 recycle 旧图：ImageView 可能还在主线程绘制它，
                 // 在后台线程 recycle 会偶发 "trying to use a recycled bitmap" 崩溃。
