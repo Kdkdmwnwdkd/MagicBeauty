@@ -6,6 +6,8 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import com.example.magicbeauty.databinding.ActivityMainBinding
 import com.example.magicbeauty.ui.HairFragment
@@ -26,6 +28,15 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Android 15 起强制全屏（edge-to-edge）：不加这层，标题会顶到状态栏里、
+        // 底部导航文字会被手势条切掉。
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(binding.root)
 
         binding.bottomNav.setOnItemSelectedListener { item ->
             if (suppressNav) return@setOnItemSelectedListener true

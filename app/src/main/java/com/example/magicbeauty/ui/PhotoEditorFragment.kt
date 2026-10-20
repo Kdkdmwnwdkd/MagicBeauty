@@ -18,7 +18,6 @@ import com.example.magicbeauty.engine.MediaPipeHelper
 import com.example.magicbeauty.engine.WarpGuide
 import com.example.magicbeauty.util.BitmapUtils
 import com.example.magicbeauty.util.SaveUtils
-import com.google.android.material.bottomsheet.BottomSheetBehavior
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -53,6 +52,10 @@ class PhotoEditorFragment : Fragment() {
     private var pendingRender = false
     private var renderErrorShown = false
 
+    /** 底部面板当前分类 / 是否展开滑块 */
+    private var currentTab = 0
+    private var expanded = true
+
     private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@registerForActivityResult
         loadImage(uri)
@@ -70,22 +73,17 @@ class PhotoEditorFragment : Fragment() {
         binding.btnPick.setOnClickListener { pickImage.launch("image/*") }
         binding.btnSave.setOnClickListener { saveCurrent() }
 
-        // 底部工具抽屉：收起时只露标签，点标签展开对应滑块
+        // 底部工具面板：常驻显示，点标签切换分类，再点同一个标签收起/展开滑块
         binding.tabLight.setOnClickListener { selectTab(0) }
         binding.tabTexture.setOnClickListener { selectTab(1) }
         binding.tabShape.setOnClickListener { selectTab(2) }
-        selectTab(0, expand = false)
+        binding.sheetHandle.setOnClickListener { setExpanded(!expanded) }
+        selectTab(0)
 
-        try {
-            BottomSheetBehavior.from(binding.toolSheet).addBottomSheetCallback(
-                object : BottomSheetBehavior.BottomSheetCallback() {
-                    override fun onStateChanged(bottomSheet: View, newState: Int) {
-                        updatePreviewInsets()
-                    }
-                    override fun onSlide(bottomSheet: View, slideOffset: Float) {}
-                }
-            )
-        } catch (_: Exception) {}
+        // 面板高度变化（收起/展开/切换分类）时重算图片可用区域
+        binding.toolSheet.addOnLayoutChangeListener { _, _, top, _, bottom, oTop, _, oBottom ->
+            if (bottom - top != oBottom - oTop) updatePreviewInsets()
+        }
         updatePreviewInsets()
 
         // 长按看原图，松手回到效果图（对比修改前后）
@@ -122,36 +120,61 @@ class PhotoEditorFragment : Fragment() {
         override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
     }
 
-    /** 切换底部工具分类；点标签时把抽屉展开 */
-    private fun selectTab(index: Int, expand: Boolean = true) {
+    /**
+     * 切换底部工具分类。再点一次当前分类 = 收起/展开滑块，
+     * 这样用户既能常驻看到工具，也能让图片占满更多空间。
+     */
+    private fun selectTab(index: Int) {
         val b = _binding ?: return
-        b.groupLight.visibility = if (index == 0) View.VISIBLE else View.GONE
-        b.groupTexture.visibility = if (index == 1) View.VISIBLE else View.GONE
-        b.groupShape.visibility = if (index == 2) View.VISIBLE else View.GONE
+        // 点的是当前分类：切换收起/展开
+        if (expanded && index == currentTab) {
+            setExpanded(false)
+            return
+        }
+        currentTab = index
         b.tabLight.isSelected = index == 0
         b.tabTexture.isSelected = index == 1
         b.tabShape.isSelected = index == 2
-        if (expand) {
-            try {
-                BottomSheetBehavior.from(b.toolSheet).state = BottomSheetBehavior.STATE_EXPANDED
-            } catch (_: Exception) {}
+        applyGroupVisibility()
+        if (!expanded) setExpanded(true) else updatePreviewInsets()
+    }
+
+    private fun setExpanded(value: Boolean) {
+        expanded = value
+        applyGroupVisibility()
+    }
+
+    private fun applyGroupVisibility() {
+        val b = _binding ?: return
+        val groups = arrayOf(b.groupLight, b.groupTexture, b.groupShape)
+        groups.forEachIndexed { i, g ->
+            val show = expanded && i == currentTab
+            if (show) {
+                if (g.visibility != View.VISIBLE) {
+                    g.visibility = View.VISIBLE
+                    g.alpha = 0f
+                    g.animate().alpha(1f).setDuration(150).start()
+                }
+            } else {
+                g.animate().cancel()
+                g.visibility = View.GONE
+            }
         }
-        updatePreviewInsets()
+        // 收起时把拖拽条转 180°，提示"可以往下拉"
+        b.sheetHandle.rotation = if (expanded) 0f else 180f
+        b.sheetHandle.post { updatePreviewInsets() }
     }
 
     /**
-     * 图片始终居中显示在「顶部栏以下、工具抽屉以上」的可见区域。
-     * 抽屉收起/展开时重新算一次，保证图片不会被挡住，也不会因为留白显得很小。
+     * 图片始终居中显示在「顶部栏以下、工具面板以上」的可见区域。
+     * 面板收起/展开时重新算一次，保证图片不会被挡住，也不会因为留白显得很小。
      */
     private fun updatePreviewInsets() {
         val b = _binding ?: return
         b.preview.post {
             val bb = _binding ?: return@post
-            // 用 y（含 translationY），抽屉拖动时 top 不一定会变
-            val sheetTop = bb.toolSheet.y.toInt()
-            if (sheetTop <= 0) return@post
             val top = bb.topBar.height
-            val bottom = (bb.previewBox.height - sheetTop).coerceAtLeast(0)
+            val bottom = bb.toolSheet.height
             bb.preview.setPadding(0, top, 0, bottom)
         }
     }
