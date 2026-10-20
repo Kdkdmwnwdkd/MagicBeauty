@@ -196,6 +196,9 @@ class PhotoEditorFragment : Fragment() {
     private fun loadImage(uri: Uri) {
         val ctx = context ?: return
         lifecycleScope.launch {
+            // 人体解析模型 66MB，首次要解压+加载，可能几秒；不给提示会被当成卡死
+            if (_binding != null) binding.progress.visibility = View.VISIBLE
+            try {
             // 解码放到 IO 线程（旧版没有采样，大图会 OOM；也没有处理 EXIF 旋转）
             val bmp = withContext(Dispatchers.IO) { BitmapUtils.decodeSampled(ctx, uri, 2048) }
             if (bmp == null) {
@@ -218,6 +221,9 @@ class PhotoEditorFragment : Fragment() {
             binding.btnSave.isEnabled = true
             updateDetectHint()
             renderPreview()
+            } finally {
+                if (_binding != null) binding.progress.visibility = View.GONE
+            }
         }
     }
 
