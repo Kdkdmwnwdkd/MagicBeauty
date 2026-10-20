@@ -52,8 +52,8 @@ class PhotoEditorFragment : Fragment() {
     private var pendingRender = false
     private var renderErrorShown = false
 
-    /** 底部面板当前分类 / 是否展开滑块 */
-    private var currentTab = 0
+    /** 底部面板当前分类 / 是否展开滑块（-1 表示还没选过） */
+    private var currentTab = -1
     private var expanded = true
 
     private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
