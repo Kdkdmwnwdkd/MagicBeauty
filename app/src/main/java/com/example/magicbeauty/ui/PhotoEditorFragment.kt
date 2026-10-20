@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -17,6 +18,7 @@ import com.example.magicbeauty.engine.MediaPipeHelper
 import com.example.magicbeauty.engine.WarpGuide
 import com.example.magicbeauty.util.BitmapUtils
 import com.example.magicbeauty.util.SaveUtils
+import com.google.android.material.bottomsheet.BottomSheetBehavior
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -68,6 +70,36 @@ class PhotoEditorFragment : Fragment() {
         binding.btnPick.setOnClickListener { pickImage.launch("image/*") }
         binding.btnSave.setOnClickListener { saveCurrent() }
 
+        // 底部工具抽屉：收起时只露标签，点标签展开对应滑块
+        binding.tabLight.setOnClickListener { selectTab(0) }
+        binding.tabTexture.setOnClickListener { selectTab(1) }
+        binding.tabShape.setOnClickListener { selectTab(2) }
+        selectTab(0, expand = false)
+
+        try {
+            BottomSheetBehavior.from(binding.toolSheet).addBottomSheetCallback(
+                object : BottomSheetBehavior.BottomSheetCallback() {
+                    override fun onStateChanged(bottomSheet: View, newState: Int) {
+                        updatePreviewInsets()
+                    }
+                    override fun onSlide(bottomSheet: View, slideOffset: Float) {}
+                }
+            )
+        } catch (_: Exception) {}
+        updatePreviewInsets()
+
+        // 长按看原图，松手回到效果图（对比修改前后）
+        binding.preview.setOnLongClickListener {
+            sourceBitmap?.let { binding.preview.setImageBitmap(it) }
+            true
+        }
+        binding.preview.setOnTouchListener { _, e ->
+            if (e.action == MotionEvent.ACTION_UP || e.action == MotionEvent.ACTION_CANCEL) {
+                lastResult?.let { binding.preview.setImageBitmap(it) }
+            }
+            false
+        }
+
         binding.sbBrightness.setOnSeekBarChangeListener(slider { params.brightness = it / 100f * 0.6f - 0.3f })
         // 对比度/饱和度的中性点要落在滑块中点(50)，否则用户拖到"中间"时画面会莫名变灰/变淡
         binding.sbContrast.setOnSeekBarChangeListener(slider { params.contrast = 0.65f + it / 100f * 0.7f })
@@ -88,6 +120,40 @@ class PhotoEditorFragment : Fragment() {
         }
         override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
         override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
+    }
+
+    /** 切换底部工具分类；点标签时把抽屉展开 */
+    private fun selectTab(index: Int, expand: Boolean = true) {
+        val b = _binding ?: return
+        b.groupLight.visibility = if (index == 0) View.VISIBLE else View.GONE
+        b.groupTexture.visibility = if (index == 1) View.VISIBLE else View.GONE
+        b.groupShape.visibility = if (index == 2) View.VISIBLE else View.GONE
+        b.tabLight.isSelected = index == 0
+        b.tabTexture.isSelected = index == 1
+        b.tabShape.isSelected = index == 2
+        if (expand) {
+            try {
+                BottomSheetBehavior.from(b.toolSheet).state = BottomSheetBehavior.STATE_EXPANDED
+            } catch (_: Exception) {}
+        }
+        updatePreviewInsets()
+    }
+
+    /**
+     * 图片始终居中显示在「顶部栏以下、工具抽屉以上」的可见区域。
+     * 抽屉收起/展开时重新算一次，保证图片不会被挡住，也不会因为留白显得很小。
+     */
+    private fun updatePreviewInsets() {
+        val b = _binding ?: return
+        b.preview.post {
+            val bb = _binding ?: return@post
+            // 用 y（含 translationY），抽屉拖动时 top 不一定会变
+            val sheetTop = bb.toolSheet.y.toInt()
+            if (sheetTop <= 0) return@post
+            val top = bb.topBar.height
+            val bottom = (bb.previewBox.height - sheetTop).coerceAtLeast(0)
+            bb.preview.setPadding(0, top, 0, bottom)
+        }
     }
 
     private fun loadImage(uri: Uri) {
