@@ -52,6 +52,9 @@ data class WarpGuide(
     val clothesEdgeLift: Float = 0f,
     /** 大眼强度的自适应系数：眼睛小就多给一点，眼睛大就少给一点 */
     val eyeGain: Float = 1f,
+    /** 人体蒙版（非背景=255）：所有形变只在这个范围内生效，背景保持不动 */
+    val personMask: ByteArray? = null,
+    val maskSize: Int = 0,
     // 是否真的检测到人脸/人体。没检测到就不能拿默认坐标硬套，
     // 否则“瘦脸/大眼”会落在画面中央（用户看到的就是“没对准脸”）。
     val hasFace: Boolean = false,

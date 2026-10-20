@@ -27,6 +27,9 @@ class LocalEditEngine {
     private var adjustProg = 0
 
     private var texSrc = 0
+    private var texMask = 0
+    private var maskRef: ByteArray? = null
+    private var maskN = 0
     private var texA = 0   // warp 输出
     private var texB = 0   // adjust 输出
     private var fboA = 0
@@ -166,6 +169,19 @@ class LocalEditEngine {
         GLES20.glUseProgram(warpProg)
         bindQuad(warpProg)
         bindTex(warpProg, "uTex", texSrc, 0)
+
+        // 人体蒙版：只有解析成功时才有，没有就退回“全图作用”（旧行为）
+        val pm = guide.personMask
+        val hasMask = pm != null && guide.maskSize > 0
+        if (hasMask && maskRef !== pm) {
+            texMask = uploadMask(pm!!, guide.maskSize, texMask)
+            maskRef = pm
+            maskN = guide.maskSize
+        }
+        f(warpProg, "uHasMask", if (hasMask) 1f else 0f)
+        val mtex = if (maskN > 0) 1.6f / maskN else 1.6f / 473f
+        f(warpProg, "uMaskTexel", mtex, mtex)
+        bindTex(warpProg, "uMask", if (hasMask) texMask else texSrc, 1)
         val fc = guide.faceCenter; val el = guide.eyeL; val er = guide.eyeR; val bc = guide.bodyCenter
         f(warpProg, "uAspect", width.toFloat() / height.toFloat().coerceAtLeast(1f))
         f(warpProg, "uFaceCenter", fc.x, fc.y)
@@ -214,6 +230,7 @@ class LocalEditEngine {
     fun release() {
         if (!initialized) return
         if (texSrc != 0) GLES20.glDeleteTextures(1, intArrayOf(texSrc), 0)
+        if (texMask != 0) GLES20.glDeleteTextures(1, intArrayOf(texMask), 0)
         if (texA != 0) GLES20.glDeleteTextures(1, intArrayOf(texA), 0)
         if (texB != 0) GLES20.glDeleteTextures(1, intArrayOf(texB), 0)
         if (fboA != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboA), 0)
@@ -223,7 +240,8 @@ class LocalEditEngine {
         EGL14.eglDestroySurface(eglDisplay, eglSurface)
         EGL14.eglTerminate(eglDisplay)
         initialized = false
-        texSrc = 0; texA = 0; texB = 0
+        texSrc = 0; texA = 0; texB = 0; texMask = 0
+        maskRef = null; maskN = 0
         fboA = 0; fboB = 0
         targetsW = 0; targetsH = 0
         try { flipBitmap?.recycle() } catch (_: Exception) {}
@@ -281,6 +299,29 @@ class LocalEditEngine {
         buf.clear()
         buf.asIntBuffer().put(pixels)
         GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, bmp.width, bmp.height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        return tex[0]
+    }
+
+    /** 上传人体蒙版（单通道）。Bitmap 首行是顶部，GL 纹理 v=0 在底部，所以要按行翻转。 */
+    private fun uploadMask(data: ByteArray, n: Int, reuse: Int): Int {
+        val tex = IntArray(1)
+        if (reuse == 0) GLES20.glGenTextures(1, tex, 0) else tex[0] = reuse
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        val flipped = ByteArray(n * n)
+        for (y in 0 until n) {
+            System.arraycopy(data, y * n, flipped, (n - 1 - y) * n, n)
+        }
+        val buf = ByteBuffer.allocateDirect(n * n).order(ByteOrder.nativeOrder())
+        buf.put(flipped)
+        buf.position(0)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_LUMINANCE, n, n, 0,
+            GLES20.GL_LUMINANCE, GLES20.GL_UNSIGNED_BYTE, buf
+        )
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)

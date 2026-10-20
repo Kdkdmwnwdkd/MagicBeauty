@@ -139,7 +139,9 @@ class MediaPipeHelper(context: Context) {
                         clothesHalfW = hp.hemHalfW,
                         clothesIsPants = hp.isPants,
                         clothesEdgeLift = hp.edgeLift,
-                        hasClothes = true
+                        hasClothes = true,
+                        personMask = hp.mask,
+                        maskSize = hp.maskSize
                     )
                     return guide
                 }

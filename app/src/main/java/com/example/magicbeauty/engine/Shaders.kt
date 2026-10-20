@@ -34,6 +34,11 @@ object Shaders {
         // 统一乘上宽高比，换算成「以图片高度为单位」的等比坐标再算权重。
         uniform float uAspect;
 
+        // 人体蒙版：非背景=1，背景=0。所有形变最后按它混合，背景保持完全不动
+        uniform sampler2D uMask;
+        uniform float uHasMask;
+        uniform vec2  uMaskTexel;   // 羽化用的偏移
+
         uniform vec2  uFaceCenter;   // 脸中心（GL 坐标，y 向上）
         uniform float uFaceHalfW;    // 半脸宽（按图片宽度归一化）
         uniform float uFaceHalfH;    // 半脸高（按图片高度归一化）
@@ -53,6 +58,17 @@ object Shaders {
         uniform float uHemLift;      // 裙摆两侧比中间高多少（大摆裙用）
         uniform float uAnkleY;       // 脚踝（腿段下界）
         uniform float uLegStretch;   // 0..0.18 拉腿
+
+        // 人体权重（5 点平均做羽化，避免蒙版边缘出现硬切）
+        float personWeight(vec2 uv) {
+            if (uHasMask < 0.5) return 1.0;
+            float s = texture2D(uMask, uv).r;
+            s += texture2D(uMask, uv + vec2(uMaskTexel.x, 0.0)).r;
+            s += texture2D(uMask, uv - vec2(uMaskTexel.x, 0.0)).r;
+            s += texture2D(uMask, uv + vec2(0.0, uMaskTexel.y)).r;
+            s += texture2D(uMask, uv - vec2(0.0, uMaskTexel.y)).r;
+            return clamp(s * 0.2, 0.0, 1.0);
+        }
 
         // 径向放大：权重 t^2 在边界处恰好为 0，所以不会出现圆形接缝
         vec2 magnify(vec2 uv, vec2 c, float r, float k, float aspect) {
@@ -126,7 +142,11 @@ object Shaders {
                 uv = magnify(uv, uEyeR, uEyeRadius, uEyeEnlarge, uAspect);
             }
 
+            // 只在人体范围内生效：背景像素直接沿用原始坐标，一点不动
+            // （半条腿露出来、被裙摆遮住一部分的情况，也会按实际像素分别处理）
             uv = clamp(uv, 0.0, 1.0);
+            uv = mix(vUV, uv, personWeight(vUV));
+
             gl_FragColor = texture2D(uTex, uv);
         }
     """

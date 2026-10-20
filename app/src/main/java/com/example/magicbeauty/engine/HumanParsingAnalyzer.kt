@@ -40,7 +40,10 @@ class HumanParsingAnalyzer(context: Context) {
         /** 是否是裤子（裤子可以拉整条腿） */
         val isPants: Boolean,
         /** 解析到的类别名，便于排查 */
-        val debug: String
+        val debug: String,
+        /** 人体蒙版（非背景=255），边长 maskSize，作为变形的作用域 */
+        val mask: ByteArray,
+        val maskSize: Int
     )
 
     private fun ensureSession(): OrtSession? {
@@ -142,6 +145,10 @@ class HumanParsingAnalyzer(context: Context) {
         val yAnkle = (ankleImg * n).toInt().coerceIn(0, n - 1)
         if (x1 <= x0 || yAnkle <= yHip) return null
 
+        // 人体蒙版：非背景（0）都算人。拉腿/瘦腰/瘦脸只在蒙版内生效，背景完全不动。
+        val mask = ByteArray(n * n)
+        for (i in mask.indices) if (cls[i].toInt() != C_BG) mask[i] = 255.toByte()
+
         // 统计下半身各类占比
         var pants = 0
         var skirt = 0
@@ -167,7 +174,7 @@ class HumanParsingAnalyzer(context: Context) {
         if (pantsRatio > 0.20f && pantsToAnkle && skirtRatio < 0.05f) {
             return Result(
                 hemY = 1f - ankleImg, hemHalfW = halfW, edgeLift = 0f, isPants = true,
-                debug = "pants %.2f".format(pantsRatio)
+                debug = "pants %.2f".format(pantsRatio), mask = mask, maskSize = n
             )
         }
 
@@ -215,7 +222,7 @@ class HumanParsingAnalyzer(context: Context) {
             hemHalfW = hemHalf,
             edgeLift = lift,
             isPants = false,
-            debug = "skirt %.2f".format(skirtRatio)
+            debug = "skirt %.2f".format(skirtRatio), mask = mask, maskSize = n
         )
     }
 
@@ -247,6 +254,7 @@ class HumanParsingAnalyzer(context: Context) {
         private const val INPUT_SIZE = 473
 
         // LIP 20 类索引
+        private const val C_BG = 0
         private const val C_DRESS = 6
         private const val C_PANTS = 9
         private const val C_JUMPSUIT = 10
