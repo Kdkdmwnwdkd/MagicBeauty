@@ -146,8 +146,11 @@ class HumanParsingAnalyzer(context: Context) {
         if (x1 <= x0 || yAnkle <= yHip) return null
 
         // 人体蒙版：非背景（0）都算人。拉腿/瘦腰/瘦脸只在蒙版内生效，背景完全不动。
-        val mask = ByteArray(n * n)
-        for (i in mask.indices) if (cls[i].toInt() != C_BG) mask[i] = 255.toByte()
+        val raw = ByteArray(n * n)
+        for (i in raw.indices) if (cls[i].toInt() != C_BG) raw[i] = 255.toByte()
+        // 膨胀 + 羽化：不羽化的话，腰部两侧（正是瘦腰要收的地方）权重会掉到 0，
+        // 形变被抵消，看起来就是“瘦腰没用”。
+        val mask = featherMask(raw, n)
 
         // 统计下半身各类占比
         var pants = 0
@@ -224,6 +227,76 @@ class HumanParsingAnalyzer(context: Context) {
             isPants = false,
             debug = "skirt %.2f".format(skirtRatio), mask = mask, maskSize = n
         )
+    }
+
+    /**
+     * 蒙版膨胀 + 盒式模糊。
+     * 目的：让人体内部（含轮廓）权重恒为 1，只在离开人体一小段距离后才衰减到 0。
+     * 这样形变不会被自身的边缘削掉，背景依然不动。
+     */
+    private fun featherMask(src: ByteArray, n: Int): ByteArray {
+        val grow = 4          // 膨胀半径（473 网格），约 0.85% 画面
+        val blur = 6          // 模糊半径，形成柔和过渡带
+        val tmp = ByteArray(n * n)
+        val dst = ByteArray(n * n)
+
+        // 横向 max
+        for (y in 0 until n) {
+            val base = y * n
+            for (x in 0 until n) {
+                var m = 0
+                val x0 = (x - grow).coerceAtLeast(0)
+                val x1 = (x + grow).coerceAtMost(n - 1)
+                for (i in x0..x1) {
+                    val v = src[base + i].toInt() and 0xff
+                    if (v > m) m = v
+                }
+                tmp[base + x] = m.toByte()
+            }
+        }
+        // 纵向 max
+        for (x in 0 until n) {
+            for (y in 0 until n) {
+                var m = 0
+                val y0 = (y - grow).coerceAtLeast(0)
+                val y1 = (y + grow).coerceAtMost(n - 1)
+                for (i in y0..y1) {
+                    val v = tmp[i * n + x].toInt() and 0xff
+                    if (v > m) m = v
+                }
+                dst[y * n + x] = m.toByte()
+            }
+        }
+        // 可分离盒式模糊（横向 + 纵向）
+        val tmp2 = ByteArray(n * n)
+        for (y in 0 until n) {
+            val base = y * n
+            for (x in 0 until n) {
+                var sum = 0
+                var cnt = 0
+                val x0 = (x - blur).coerceAtLeast(0)
+                val x1 = (x + blur).coerceAtMost(n - 1)
+                for (i in x0..x1) {
+                    sum += dst[base + i].toInt() and 0xff
+                    cnt++
+                }
+                tmp2[base + x] = (sum / cnt).toByte()
+            }
+        }
+        for (x in 0 until n) {
+            for (y in 0 until n) {
+                var sum = 0
+                var cnt = 0
+                val y0 = (y - blur).coerceAtLeast(0)
+                val y1 = (y + blur).coerceAtMost(n - 1)
+                for (i in y0..y1) {
+                    sum += tmp2[i * n + x].toInt() and 0xff
+                    cnt++
+                }
+                dst[y * n + x] = (sum / cnt).toByte()
+            }
+        }
+        return dst
     }
 
     private fun median(rows: IntArray, from: Int, to: Int): Int {

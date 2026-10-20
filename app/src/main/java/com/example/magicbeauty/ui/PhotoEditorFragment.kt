@@ -231,13 +231,21 @@ class PhotoEditorFragment : Fragment() {
     private fun updateDetectHint() {
         if (_binding == null) return
         val missing = ArrayList<String>(2)
-        if (!guide.hasFace) missing.add("人脸")
-        if (!guide.hasPose) missing.add("人体")
+        val off = ArrayList<String>(2)
+        if (!guide.hasFace) {
+            missing.add("人脸")
+            off.add("瘦脸/大眼")
+        }
+        if (!guide.hasPose) {
+            missing.add("人体")
+            off.add("瘦腰/拉腿")
+        }
         if (missing.isEmpty()) {
             binding.tvHint.visibility = View.GONE
         } else {
+            // 只缺人脸时，不要连带说“瘦腰/拉腿也失效”，之前那句提示会误导
             binding.tvHint.text = "未识别到${missing.joinToString("、")}：" +
-                    "对应的瘦脸/大眼/瘦腰/拉腿不会生效（正脸、全身照效果最好）"
+                    "${off.joinToString("、")}不会生效（正脸、全身照效果最好）"
             binding.tvHint.visibility = View.VISIBLE
         }
     }

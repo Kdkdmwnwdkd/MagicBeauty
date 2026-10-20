@@ -62,6 +62,7 @@ object Shaders {
         // 人体权重（5 点平均做羽化，避免蒙版边缘出现硬切）
         float personWeight(vec2 uv) {
             if (uHasMask < 0.5) return 1.0;
+            // 蒙版在 CPU 侧已经做过膨胀+模糊，这里只做一次轻微平滑，保证边缘平滑过渡
             float s = texture2D(uMask, uv).r;
             s += texture2D(uMask, uv + vec2(uMaskTexel.x, 0.0)).r;
             s += texture2D(uMask, uv - vec2(uMaskTexel.x, 0.0)).r;
@@ -97,6 +98,10 @@ object Shaders {
                 float L = max(top - uAnkleY, 0.02);
                 float delta = min(uLegStretch * L, 0.08);   // 上移量最多占画面高 8%，避免裁掉头顶
                 float s = 1.0 + delta / L;
+                // 单段最多拉长 18%：裙摆很低（只有一小截腿露出）时，
+                // 否则那一小段会被放大成“小腿过长”，看着像坏了
+                s = min(s, 1.18);
+                delta = (s - 1.0) * L;
                 float hipOut = top + delta;
                 float y = uv.y;
                 if (y >= hipOut) {
@@ -104,11 +109,8 @@ object Shaders {
                 } else if (y > uAnkleY) {
                     y = uAnkleY + (y - uAnkleY) / s;
                 }
-                // 超高斯横向权重：身体范围内 ≈1，到 2.2 倍半宽处基本为 0，
-                // 这样人体被完整拉伸，旁边的门/墙角保持不动。
-                float dxb = abs(uv.x - uBodyCenter.x) / max(uLegHalfW, 0.02);
-                float wx = exp(-pow(dxb / 2.4, 4.0));
-                y = mix(uv.y, y, wx);
+                // 作用范围交给人体蒙版统一控制（最后一步 mix），这里不再叠加横向权重，
+                // 否则“蒙版 + 横向权重”双重衰减会让腿部边缘出现台阶、幅度也被削掉。
                 uv.y = y;
             }
 
@@ -116,9 +118,10 @@ object Shaders {
             if (uWaistSlim > 0.001) {
                 float hw = max(uBodyHalfW * uAspect, 0.02);
                 float dx = (uv.x - uBodyCenter.x) * uAspect / hw;
-                float dy = (uv.y - uWaistY) / (hw * 0.85);
-                float w = exp(-dx * dx * 0.65) * exp(-dy * dy);
-                uv.x = uBodyCenter.x + (uv.x - uBodyCenter.x) * (1.0 + uWaistSlim * 0.18 * w);
+                // 垂直带窄一点，收得更集中在腰上，不会把胯一起缩
+                float dy = (uv.y - uWaistY) / (hw * 0.70);
+                float w = exp(-dx * dx * 0.45) * exp(-dy * dy);
+                uv.x = uBodyCenter.x + (uv.x - uBodyCenter.x) * (1.0 + uWaistSlim * 0.28 * w);
             }
 
             // ---------- ③ 瘦脸：只收下颌轮廓，五官不动 ----------
