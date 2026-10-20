@@ -37,6 +37,14 @@ class LocalEditEngine {
     private var targetsW = 0
     private var targetsH = 0
 
+    // 复用缓冲：视频逐帧处理时避免每帧分配几十 MB（否则 GC 抖动会明显拖慢速度）
+    private var flipBitmap: Bitmap? = null
+    private var flipCanvas: Canvas? = null
+    private var uploadBuf: ByteBuffer? = null
+    private var readBuf: ByteBuffer? = null
+    private var readBytes: ByteArray? = null
+    private var readPixels: IntArray? = null
+
     private val quadPos = floatArrayOf(
         -1f, -1f, 1f, -1f, -1f, 1f,
         -1f, 1f, 1f, -1f, 1f, 1f
@@ -92,11 +100,19 @@ class LocalEditEngine {
         width = b.width
         height = b.height
         // GL 纹理原点在左下，上传前先垂直翻转，保证预览/输出方向正确
-        val flipped = Bitmap.createBitmap(b.width, b.height, Bitmap.Config.ARGB_8888)
-        Canvas(flipped).apply {
-            val m = Matrix().apply { postScale(1f, -1f, b.width / 2f, b.height / 2f) }
-            drawBitmap(b, m, null)
+        // （复用同一张翻转位图；源图不透明且变换覆盖整幅，不必先清空）
+        val flipped: Bitmap = if (flipBitmap?.width == b.width && flipBitmap?.height == b.height) {
+            flipBitmap!!
+        } else {
+            try { flipBitmap?.recycle() } catch (_: Exception) {}
+            Bitmap.createBitmap(b.width, b.height, Bitmap.Config.ARGB_8888).also {
+                flipBitmap = it
+                flipCanvas = Canvas(it)
+            }
         }
+        val canvas = flipCanvas ?: Canvas(flipped).also { flipCanvas = it }
+        val m = Matrix().apply { postScale(1f, -1f, b.width / 2f, b.height / 2f) }
+        canvas.drawBitmap(b, m, null)
         texSrc = uploadTexture(flipped, texSrc)
         ensureTargets(width, height)
         return b
@@ -166,6 +182,9 @@ class LocalEditEngine {
         texSrc = 0; texA = 0; texB = 0
         fboA = 0; fboB = 0
         targetsW = 0; targetsH = 0
+        try { flipBitmap?.recycle() } catch (_: Exception) {}
+        flipBitmap = null; flipCanvas = null
+        uploadBuf = null; readBuf = null; readBytes = null; readPixels = null
     }
 
     // ---------- GL 辅助 ----------
@@ -204,7 +223,13 @@ class LocalEditEngine {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
         val pixels = IntArray(bmp.width * bmp.height)
         bmp.getPixels(pixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
-        val buf = ByteBuffer.allocateDirect(pixels.size * 4).order(ByteOrder.nativeOrder())
+        val need = pixels.size * 4
+        var buf = uploadBuf
+        if (buf == null || buf.capacity() < need) {
+            buf = ByteBuffer.allocateDirect(need).order(ByteOrder.nativeOrder())
+            uploadBuf = buf
+        }
+        buf.clear()
         buf.asIntBuffer().put(pixels)
         GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, bmp.width, bmp.height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
@@ -216,15 +241,31 @@ class LocalEditEngine {
 
     private fun readFramebuffer(fbo: Int): Bitmap {
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
-        val buf = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
+        val need = width * height * 4
+        var buf = readBuf
+        if (buf == null || buf.capacity() < need) {
+            buf = ByteBuffer.allocateDirect(need).order(ByteOrder.nativeOrder())
+            readBuf = buf
+        }
+        buf.clear()
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
         // 注意：allocateDirect 的 Buffer 没有可访问的 backing array，
         // 调 buf.array() 会抛 UnsupportedOperationException（这正是之前必崩的原因）。
         // 正确做法是先把数据读进普通 ByteArray。
-        val bytes = ByteArray(width * height * 4)
+        var bytes = readBytes
+        if (bytes == null || bytes.size < need) {
+            bytes = ByteArray(need)
+            readBytes = bytes
+        }
         buf.position(0)
-        buf.get(bytes)
-        val pixels = IntArray(width * height)
+        buf.get(bytes, 0, need)
+
+        var pixels = readPixels
+        val pxCount = width * height
+        if (pixels == null || pixels.size < pxCount) {
+            pixels = IntArray(pxCount)
+            readPixels = pixels
+        }
         for (y in 0 until height) {
             val srcRow = (height - 1 - y) * width * 4
             val dstRow = y * width
@@ -237,6 +278,7 @@ class LocalEditEngine {
                 pixels[dstRow + x] = (a shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
+        // createBitmap 会复制像素，因此 pixels 可以安全复用
         return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
     }
 

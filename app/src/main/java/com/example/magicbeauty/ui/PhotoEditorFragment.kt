@@ -100,7 +100,7 @@ class PhotoEditorFragment : Fragment() {
             }
             val pair = try {
                 withContext(glDispatcher) {
-                    val src = engine.setSource(bmp)
+                    val src = engine.setSource(bmp, 1920)
                     val g = try { mp.analyze(src) } catch (_: Exception) { WarpGuide() }
                     src to g
                 }

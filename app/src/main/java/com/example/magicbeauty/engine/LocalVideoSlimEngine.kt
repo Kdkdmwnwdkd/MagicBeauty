@@ -128,7 +128,7 @@ class LocalVideoSlimEngine(private val context: Context) {
                         val image = reader.acquireNextImage()
                         if (image != null) {
                             try {
-                                val bmp = yuvToBitmap(image, width, height)
+                                val bmp = yuvToBitmap(image)
                                 if (frameNo % 10 == 0) {
                                     try { guide = mp.analyze(bmp) } catch (_: Exception) {}
                                 }
@@ -371,8 +371,20 @@ class LocalVideoSlimEngine(private val context: Context) {
         }
     }
 
-    /** YUV_420_888(Image) -> Bitmap，直接算 ARGB，不再走 JPEG 中转（旧版每帧压 JPEG 极慢）。 */
-    private fun yuvToBitmap(image: Image, w: Int, h: Int): Bitmap {
+    /**
+     * YUV_420_888(Image) -> Bitmap，直接算 ARGB，不再走 JPEG 中转（旧版每帧压 JPEG 极慢）。
+     * 若源分辨率超过 [maxDim]，在转换时就按最近邻降采样，避免先分配一张 4K 大图。
+     */
+    private fun yuvToBitmap(image: Image, maxDim: Int = PROCESS_MAX_DIM): Bitmap {
+        val sw = image.width
+        val sh = image.height
+        val longer = maxOf(sw, sh)
+        val scale = if (longer > maxDim) maxDim.toFloat() / longer else 1f
+        var ow = ((sw * scale).toInt().coerceAtLeast(2)) and 0x7FFE
+        var oh = ((sh * scale).toInt().coerceAtLeast(2)) and 0x7FFE
+        if (ow > sw) ow = sw
+        if (oh > sh) oh = sh
+
         val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
         val ys = yP.rowStride; val yp = yP.pixelStride
         val us = uP.rowStride; val up = uP.pixelStride
@@ -382,15 +394,18 @@ class LocalVideoSlimEngine(private val context: Context) {
         val uArr = ByteArray(uP.buffer.remaining()).also { uP.buffer.rewind(); uP.buffer.get(it) }
         val vArr = ByteArray(vP.buffer.remaining()).also { vP.buffer.rewind(); vP.buffer.get(it) }
 
-        val out = IntArray(w * h)
-        for (r in 0 until h) {
-            val yBase = r * ys
-            val uvRow = r / 2
-            for (c in 0 until w) {
-                val yi = yBase + c * yp
+        val out = IntArray(ow * oh)
+        for (oy in 0 until oh) {
+            val sy = oy * sh / oh
+            val yBase = sy * ys
+            val uvRow = sy / 2
+            val dstRow = oy * ow
+            for (ox in 0 until ow) {
+                val sx = ox * sw / ow
+                val yi = yBase + sx * yp
                 val y = if (yi < yArr.size) (yArr[yi].toInt() and 0xff) else 0
-                val ui = uvRow * us + (c / 2) * up
-                val vi = uvRow * vs + (c / 2) * vp
+                val ui = uvRow * us + (sx / 2) * up
+                val vi = uvRow * vs + (sx / 2) * vp
                 val u = if (ui < uArr.size) (uArr[ui].toInt() and 0xff) else 128
                 val v = if (vi < vArr.size) (vArr[vi].toInt() and 0xff) else 128
 
@@ -400,10 +415,10 @@ class LocalVideoSlimEngine(private val context: Context) {
                 val rr = (1.164f * yf + 1.596f * vf).toInt().coerceIn(0, 255)
                 val gg = (1.164f * yf - 0.392f * uf - 0.813f * vf).toInt().coerceIn(0, 255)
                 val bb = (1.164f * yf + 2.017f * uf).toInt().coerceIn(0, 255)
-                out[r * w + c] = (0xff shl 24) or (rr shl 16) or (gg shl 8) or bb
+                out[dstRow + ox] = (0xff shl 24) or (rr shl 16) or (gg shl 8) or bb
             }
         }
-        return Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
+        return Bitmap.createBitmap(out, ow, oh, Bitmap.Config.ARGB_8888)
     }
 
     /** Bitmap -> NV12（Y 平面 + UV 交错，U 在前），用于 SemiPlanar。 */

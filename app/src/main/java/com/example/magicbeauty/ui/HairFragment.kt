@@ -90,7 +90,7 @@ class HairFragment : Fragment() {
                         .ifBlank { "flowing long wavy hair with wispy strands, silky, anime style" }
 
                     val bmp = withContext(Dispatchers.IO) {
-                        BitmapUtils.decodeSampled(ctx, uri, 1536)
+                        BitmapUtils.decodeSampled(ctx, uri, 1280)
                     } ?: throw Exception("图片读取失败")
 
                     val pngBytes = withContext(Dispatchers.IO) {

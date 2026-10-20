@@ -25,6 +25,10 @@ class VideoSlimFragment : Fragment() {
     private val binding get() = _binding!!
 
     private var videoUri: Uri? = null
+
+    // 本地处理：结果保留为文件，保存时流式写入相册（不把整段视频读进内存）
+    private var resultFile: File? = null
+    // 云端处理：接口直接返回字节，只能放内存
     private var resultBytes: ByteArray? = null
 
     private val pickVideo = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -56,10 +60,17 @@ class VideoSlimFragment : Fragment() {
         val leg = strength * 0.5f
         val ctx = context ?: return
 
+        // 清掉上一次的结果，避免 cache 里堆文件
+        try { resultFile?.delete() } catch (_: Exception) {}
+        resultFile = null
+        resultBytes = null
+        if (_binding != null) binding.btnSave.isEnabled = false
+
         lifecycleScope.launch {
             setBusy(true)
             var inFile: File? = null
             var outFile: File? = null
+            var keepOut = false
             try {
                 // 先把视频落到本地文件，避免整包读进内存（旧版 readBytes 大视频必 OOM）
                 val src = File(ctx.cacheDir, "mb_in_${System.currentTimeMillis()}.mp4")
@@ -69,7 +80,7 @@ class VideoSlimFragment : Fragment() {
                     input.use { i -> src.outputStream().use { o -> i.copyTo(o) } }
                 }
 
-                resultBytes = if (ApiConfig.videoSlimEndpoint.isBlank()) {
+                if (ApiConfig.videoSlimEndpoint.isBlank()) {
                     val target = File(ctx.cacheDir, "mb_out_${System.currentTimeMillis()}.mp4")
                     outFile = target
                     val engine = LocalVideoSlimEngine(ctx)
@@ -80,11 +91,13 @@ class VideoSlimFragment : Fragment() {
                             onLog = { msg -> ui { setStatus(msg) } }
                         )
                     }
-                    withContext(Dispatchers.IO) { done.readBytes() }
+                    resultFile = done
+                    keepOut = true
+                    resultBytes = null
                 } else {
-                    val data = withContext(Dispatchers.IO) { src.readBytes() }
-                    BeautyService.slimVideo(
-                        data, "input.mp4",
+                    // 云端：直接流式上传文件，避免 readBytes 把长视频读爆内存
+                    resultBytes = BeautyService.slimVideo(
+                        src, "input.mp4",
                         mapOf("strength" to strength.toString())
                     )
                 }
@@ -94,9 +107,10 @@ class VideoSlimFragment : Fragment() {
             } catch (e: Exception) {
                 ui { setStatus("失败：${e.message}") }
             } finally {
-                // 清掉临时文件，避免 cache 越积越大
                 try { inFile?.delete() } catch (_: Exception) {}
-                try { outFile?.delete() } catch (_: Exception) {}
+                if (!keepOut) {
+                    try { outFile?.delete() } catch (_: Exception) {}
+                }
                 setBusy(false)
             }
         }
@@ -132,11 +146,20 @@ class VideoSlimFragment : Fragment() {
     }
 
     private fun save() {
-        val data = resultBytes ?: return
         val ctx = context ?: return
+        val file = resultFile
+        val data = resultBytes
+        if (file == null && data == null) return
+
         // 视频几十 MB，写相册必须放到 IO 线程，否则很容易 ANR
         lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) { SaveUtils.saveVideo(ctx, data) }
+            val ok = withContext(Dispatchers.IO) {
+                when {
+                    file != null && file.exists() -> SaveUtils.saveVideoFile(ctx, file)
+                    data != null -> SaveUtils.saveVideo(ctx, data)
+                    else -> false
+                }
+            }
             Toast.makeText(
                 ctx,
                 if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）",

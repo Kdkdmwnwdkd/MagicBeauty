@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import java.io.File
 
 object SaveUtils {
 
@@ -52,6 +53,41 @@ object SaveUtils {
         return try {
             val os = resolver.openOutputStream(uri) ?: error("无法打开输出流")
             os.use { it.write(bytes) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            }
+            true
+        } catch (_: Exception) {
+            try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+            false
+        }
+    }
+
+    /**
+     * 从本地文件流式写入相册，避免把整段视频读进内存。
+     * 视频瘦身的本地结果用这个保存（几十 MB 的视频也不会撑爆堆）。
+     */
+    fun saveVideoFile(
+        context: Context,
+        file: File,
+        name: String = "magic_video_${System.currentTimeMillis()}.mp4"
+    ): Boolean {
+        if (!file.exists()) return false
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, name)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/MagicBeauty")
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+        }
+        val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+        return try {
+            val os = resolver.openOutputStream(uri) ?: error("无法打开输出流")
+            os.use { out -> file.inputStream().use { it.copyTo(out) } }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 values.clear()
                 values.put(MediaStore.Video.Media.IS_PENDING, 0)
