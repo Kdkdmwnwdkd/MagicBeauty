@@ -113,12 +113,16 @@ class CropOverlayView @JvmOverloads constructor(
         crop.set(left, top, left + w, top + h)
     }
 
-    /** contain 映射参数 */
+    /** contain 映射参数（与 fitCenter ImageView 一致：遵守 padding） */
     private fun mapping(): FloatArray {
-        val scale = min(viewW / imgW, viewH / imgH)
+        val ew = (viewW - paddingLeft - paddingRight).coerceAtLeast(1f)
+        val eh = (viewH - paddingTop - paddingBottom).coerceAtLeast(1f)
+        val scale = min(ew / imgW, eh / imgH)
         val dispW = imgW * scale
         val dispH = imgH * scale
-        return floatArrayOf(scale, (viewW - dispW) / 2f, (viewH - dispH) / 2f, dispW, dispH)
+        val offX = paddingLeft + (ew - dispW) / 2f
+        val offY = paddingTop + (eh - dispH) / 2f
+        return floatArrayOf(scale, offX, offY, dispW, dispH)
     }
 
     /** 归一化 → 屏幕像素 */
@@ -224,48 +228,65 @@ class CropOverlayView @JvmOverloads constructor(
         onCropChanged?.invoke()
     }
 
-    /** 拖动把手时保持比例：以对角为锚点调整 */
+    /**
+     * 拖动把手时保持比例。
+     * 进入本函数时 applyDrag 已把 crop 改成"跟随手指"的原始值，
+     * 因此自由边取 **crop 的实时边**（而不是 dragStartRect——旧代码取错导致 w 恒 0、裁剪框直接塌缩到最小）。
+     * 角把手：自由边=正在拖的两条边，锚=对角（dragStartRect 的对角，拖动过程中不动）。
+     * 边把手：只有一个方向自由，另一边由比例推导、并以锚边为中心居中。
+     */
     private fun fitRatioOnHandle(handle: Int) {
         val target = screenRatio(ratio)
-        // 锚点（对角）
-        val anchorX: Float
-        val anchorY: Float
+        val freeX: Float; val freeY: Float
+        val anchorX: Float; val anchorY: Float
         when (handle) {
-            1 -> { anchorX = dragStartRect.right; anchorY = dragStartRect.bottom }
-            3 -> { anchorX = dragStartRect.left; anchorY = dragStartRect.top }
-            2 -> { anchorX = dragStartRect.left; anchorY = dragStartRect.bottom }
-            4 -> { anchorX = dragStartRect.right; anchorY = dragStartRect.top }
-            5, 7 -> { anchorX = dragStartRect.centerX(); anchorY = dragStartRect.centerY() }
-            6, 8 -> { anchorX = dragStartRect.centerX(); anchorY = dragStartRect.centerY() }
+            // 角把手：实时 crop 边为自由边，dragStartRect 对角为锚
+            1 -> { freeX = crop.left;   freeY = crop.top;    anchorX = dragStartRect.right; anchorY = dragStartRect.bottom }
+            2 -> { freeX = crop.right;  freeY = crop.top;    anchorX = dragStartRect.left;  anchorY = dragStartRect.bottom }
+            3 -> { freeX = crop.right;  freeY = crop.bottom; anchorX = dragStartRect.left;  anchorY = dragStartRect.top }
+            4 -> { freeX = crop.left;   freeY = crop.bottom; anchorX = dragStartRect.right; anchorY = dragStartRect.top }
+            // 边把手：只有一个轴自由，另一轴以 dragStartRect 的中心线固定
+            5 -> { freeX = dragStartRect.centerX(); freeY = crop.top;    anchorX = dragStartRect.centerX(); anchorY = dragStartRect.bottom }
+            7 -> { freeX = dragStartRect.centerX(); freeY = crop.bottom; anchorX = dragStartRect.centerX(); anchorY = dragStartRect.top }
+            6 -> { freeX = crop.right; freeY = dragStartRect.centerY(); anchorX = dragStartRect.left;  anchorY = dragStartRect.centerY() }
+            8 -> { freeX = crop.left;  freeY = dragStartRect.centerY(); anchorX = dragStartRect.right; anchorY = dragStartRect.centerY() }
             else -> return
         }
-        // 从锚点出发，宽 = |free - anchor|，按比例求高
-        val freeX = if (handle == 5 || handle == 7 || handle == 6 || handle == 8) dragStartRect.centerX() else
-            (if (handle == 1 || handle == 4) dragStartRect.right else dragStartRect.left)
-        val freeY = if (handle == 5 || handle == 7) dragStartRect.bottom else
-            if (handle == 6 || handle == 8) dragStartRect.centerY() else
-            (if (handle == 1 || handle == 2) dragStartRect.bottom else dragStartRect.top)
-
-        var w = abs(freeX - anchorX).coerceAtLeast(MIN_SIZE)
-        var h = w / target
-        if (h < MIN_SIZE) { h = MIN_SIZE; w = h * target }
-        // 方向
+        val dx = abs(freeX - anchorX)
+        val dy = abs(freeY - anchorY)
+        var w: Float; var h: Float
+        if (handle == 5 || handle == 7) {
+            // 上下边：高自由，宽按比例推导
+            h = dy.coerceAtLeast(MIN_SIZE)
+            w = h * target
+        } else if (handle == 6 || handle == 8) {
+            // 左右边：宽自由，高按比例推导
+            w = dx.coerceAtLeast(MIN_SIZE)
+            h = w / target
+        } else {
+            // 角把手：取不超过拖动范围的最大内接比例框（拖哪个方向都不越界）
+            if (dx / target > dy) { w = dx; h = w / target } else { h = dy; w = h * target }
+            if (w < MIN_SIZE) { w = MIN_SIZE; h = w / target }
+            if (h < MIN_SIZE) { h = MIN_SIZE; w = h * target }
+        }
+        // 方向（锚在左上/右上/左下/右下）
         val dirX = if (freeX >= anchorX) 1 else -1
         val dirY = if (freeY >= anchorY) 1 else -1
-        var left = if (dirX > 0) anchorX else anchorX - w
-        var right = if (dirX > 0) anchorX + w else anchorX
-        var top = if (dirY > 0) anchorY else anchorY - h
-        var bottom = if (dirY > 0) anchorY + h else anchorY
-        // 边界钳制：超出则整体缩放
+        // 边把手：非自由轴居中于锚边中心
+        var left = if (handle == 6 || handle == 8) anchorX - w / 2f else (if (dirX > 0) anchorX else anchorX - w)
+        var top = if (handle == 5 || handle == 7) anchorY - h / 2f else (if (dirY > 0) anchorY else anchorY - h)
+        var right = left + w
+        var bottom = top + h
+        // 边界钳制：超出则整体等比缩小（保持锚点不动）
         if (left < 0.01f || right > 0.99f || top < 0.01f || bottom > 0.99f) {
             val maxW = min(if (dirX > 0) 0.99f - anchorX else anchorX - 0.01f, 0.98f)
             val maxH = min(if (dirY > 0) 0.99f - anchorY else anchorY - 0.01f, 0.98f)
             val scaleF = min(maxW / w, maxH / h)
             w *= scaleF; h *= scaleF
-            left = if (dirX > 0) anchorX else anchorX - w
-            right = if (dirX > 0) anchorX + w else anchorX
-            top = if (dirY > 0) anchorY else anchorY - h
-            bottom = if (dirY > 0) anchorY + h else anchorY
+            left = if (handle == 6 || handle == 8) anchorX - w / 2f else (if (dirX > 0) anchorX else anchorX - w)
+            top = if (handle == 5 || handle == 7) anchorY - h / 2f else (if (dirY > 0) anchorY else anchorY - h)
+            right = left + w
+            bottom = top + h
         }
         crop.set(left, top, right, bottom)
     }

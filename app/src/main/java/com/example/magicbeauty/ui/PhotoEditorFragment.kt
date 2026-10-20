@@ -33,10 +33,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 import kotlin.math.PI
+
+/** AI 消除「开始消除」按钮的 tag（用于去重查找） */
+private const val TAG_AI_ERASE_BTN = "mb_ai_erase_btn"
 
 class PhotoEditorFragment : Fragment() {
 
@@ -50,6 +52,10 @@ class PhotoEditorFragment : Fragment() {
      */
     private val glExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "mb-photo-gl") }
     private val glDispatcher = glExecutor.asCoroutineDispatcher()
+    /** onDestroy 里即发即弃的释放协程作用域（不阻塞主线程） */
+    private val releaseScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + glDispatcher
+    )
 
     private val engine = LocalEditEngine()
     private lateinit var mp: MediaPipeHelper
@@ -60,8 +66,13 @@ class PhotoEditorFragment : Fragment() {
     private var lastResult: Bitmap? = null
     private var renderJob: Job? = null
 
+    /** 源图代数：替换/换图时 +1，异步分析回来只接受最新一代，丢弃过期结果 */
+    private var sourceToken = 0
+
     private var rendering = false
     private var pendingRender = false
+    /** 渲染进行中点了保存：渲染完成后自动补一次保存 */
+    private var pendingSave = false
     private var renderErrorShown = false
 
     /** 底部面板当前分类 / 是否展开滑块（-1 表示还没选过） */
@@ -153,6 +164,8 @@ class PhotoEditorFragment : Fragment() {
         // 塑形手动定位：拖动裙摆/脚踝两条线，兜底检测不准的情况
         binding.btnGuideLines.setOnClickListener {
             val show = binding.guideLines.visibility != View.VISIBLE
+            // 与工具面板互斥：开定位线先收起工具，避免浮层互相遮挡
+            if (show && activeTool != null) closeTool()
             binding.guideLines.visibility = if (show) View.VISIBLE else View.GONE
             if (show) {
                 sourceBitmap?.let {
@@ -279,6 +292,8 @@ class PhotoEditorFragment : Fragment() {
         binding.maskPaint.visibility = if (id == "mosaic") View.VISIBLE else View.GONE
         binding.stickerLayer.visibility =
             if (id == "sticker") View.VISIBLE else View.GONE
+        // 工具浮层与塑形定位线互斥：同时出现会互相遮挡、手势还会打架
+        binding.guideLines.visibility = View.GONE
         when (id) {
             "crop" -> {
                 sourceBitmap?.let {
@@ -287,7 +302,10 @@ class PhotoEditorFragment : Fragment() {
                 }
             }
             "mosaic" -> {
-                sourceBitmap?.let { binding.maskPaint.setImageSize(it.width, it.height) }
+                sourceBitmap?.let { binding.maskPaint.setImageSize(it.width, it.height, clear = false) }
+                // 打开马赛克工具必须置 enabled——否则涂了也看不到效果
+                // （旧代码只在面板里切 brushOnly，enabled 永远是 false）
+                mosaicSpec.enabled = true
             }
             "sticker" -> binding.stickerLayer.stickers = stickerItems
         }
@@ -306,7 +324,14 @@ class PhotoEditorFragment : Fragment() {
         binding.maskPaint.visibility = View.GONE
         // 贴纸层保持可见（不退出贴纸模式时仍能看到选中框）
         if (stickerItems.isEmpty()) binding.stickerLayer.visibility = View.GONE
+        removeAiEraseButton()
         refreshToolEntries()
+    }
+
+    /** AI 消除的「开始消除」按钮：按 tag 查找，保证同一时刻只有一个 */
+    private fun removeAiEraseButton() {
+        val box = _binding?.previewBox ?: return
+        box.findViewWithTag<View>(TAG_AI_ERASE_BTN)?.let { box.removeView(it) }
     }
 
     private fun refreshToolEntries() {
@@ -364,6 +389,9 @@ class PhotoEditorFragment : Fragment() {
         binding.btnMosaicDone.setOnClickListener { closeTool() }
         binding.maskPaint.onMaskChanged = {
             mosaicSpec.mask = binding.maskPaint.mask
+            // mask 是同一实例反复重画，引擎靠 maskVersion 判断重传——必须递增，
+            // 否则改完涂抹预览不会更新（旧代码漏了这一步）
+            mosaicSpec.maskVersion++
             if (sourceBitmap != null) renderPreview()
         }
 
@@ -455,6 +483,7 @@ class PhotoEditorFragment : Fragment() {
 
     private fun buildCollage(uris: List<Uri>) {
         val ctx = context ?: return
+        if (uris.size > 9) toast("最多 9 张，已取前 9 张")
         lifecycleScope.launch {
             if (_binding != null) binding.progress.visibility = View.VISIBLE
             try {
@@ -498,23 +527,23 @@ class PhotoEditorFragment : Fragment() {
             toast("先选一张照片")
             return
         }
-        // 复用马赛克笔视图当“涂抹选区”
-        binding.maskPaint.setImageSize(sourceBitmap!!.width, sourceBitmap!!.height)
+        // 复用马赛克笔视图当“涂抹选区”（清空旧涂抹，避免残留上次的选区）
+        binding.maskPaint.setImageSize(sourceBitmap!!.width, sourceBitmap!!.height, clear = true)
         binding.maskPaint.visibility = View.VISIBLE
         binding.maskPaint.onMaskChanged = null // 涂抹阶段不实时渲染
         binding.tvHint.text = "涂抹要消除的内容，然后点「开始消除」"
         binding.tvHint.visibility = View.VISIBLE
+        // 先删旧按钮再建新的：连点两次「AI 消除」不会叠出两个开始按钮
+        removeAiEraseButton()
         val btn = TextView(requireContext()).apply {
             text = "开始消除"
+            tag = TAG_AI_ERASE_BTN
             setBackgroundResource(R.drawable.bg_tab)
             setTextColor(resources.getColor(R.color.tab_text, null))
             val p = (12 * resources.displayMetrics.density).toInt()
             setPadding(p, 0, p, 0)
             gravity = android.view.Gravity.CENTER
-            setOnClickListener {
-                binding.previewBox.removeView(this)
-                runAiErase()
-            }
+            setOnClickListener { runAiErase() }
         }
         binding.previewBox.addView(btn, android.widget.FrameLayout.LayoutParams(
             android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -528,15 +557,19 @@ class PhotoEditorFragment : Fragment() {
     private fun runAiErase() {
         val src = sourceBitmap ?: return
         val mask = binding.maskPaint.mask
+        // 先验证再撤按钮：空涂抹时按钮保留，用户还能接着涂
+        // （旧代码在按钮点击里先 removeView 再验证，失败后按钮没了，直接死局）
         if (mask == null || !binding.maskPaint.hasPaint()) {
             toast("先涂抹要消除的区域")
             return
         }
+        removeAiEraseButton()
         binding.maskPaint.visibility = View.GONE
         binding.tvHint.visibility = View.GONE
         // 恢复马赛克笔的常规回调
         binding.maskPaint.onMaskChanged = {
             mosaicSpec.mask = binding.maskPaint.mask
+            mosaicSpec.maskVersion++
             if (sourceBitmap != null) renderPreview()
         }
         lifecycleScope.launch {
@@ -769,9 +802,17 @@ class PhotoEditorFragment : Fragment() {
         replaceSource(out)
     }
 
-    /** 替换源图：重新上传 + 重跑人像分析（旋转/裁剪后人脸坐标全变了，必须重算）。 */
+    /**
+     * 替换源图：重新上传 + 重跑人像分析（旋转/裁剪后人脸坐标全变了，必须重算）。
+     * 进入即把 sourceBitmap 乐观改成 newSrc——连点两次按钮时第二次基于第一次的
+     * 结果计算，不会互相覆盖（旧代码等协程末尾才更新，快速连点会丢变换）。
+     * 异步分析回来只接受最新一代（sourceToken），过期代直接丢弃。
+     */
     private fun replaceSource(newSrc: Bitmap) {
         val ctx = context ?: return
+        val old = sourceBitmap
+        sourceBitmap = newSrc          // 乐观更新
+        val token = ++sourceToken
         lifecycleScope.launch {
             if (_binding != null) binding.progress.visibility = View.VISIBLE
             try {
@@ -782,16 +823,24 @@ class PhotoEditorFragment : Fragment() {
                         s to g
                     }
                 } catch (e: Exception) {
+                    // 上传失败：回滚乐观更新，别让源图指向一张引擎没有的图
+                    if (token == sourceToken) sourceBitmap = old
                     toast("处理失败：${e.message}")
                     return@launch
                 }
+                if (token != sourceToken) return@launch   // 过期代：丢弃
                 sourceBitmap = pair.first
                 guide = pair.second
                 if (_binding == null) return@launch
+                // 浮层图像尺寸全部刷新：否则 contain 映射还是旧尺寸，选区/贴纸/定位线全错位
+                binding.maskPaint.setImageSize(pair.first.width, pair.first.height, clear = false)
+                binding.cropOverlay.setImageSize(pair.first.width, pair.first.height)
+                binding.stickerLayer.setImageSize(pair.first.width, pair.first.height)
+                binding.guideLines.setImageSize(pair.first.width, pair.first.height)
                 updateDetectHint()
                 renderPreview()
             } finally {
-                if (_binding != null) binding.progress.visibility = View.GONE
+                if (_binding != null && token == sourceToken) binding.progress.visibility = View.GONE
             }
         }
     }
@@ -913,6 +962,8 @@ class PhotoEditorFragment : Fragment() {
             row.addView(chip)
         }
         refreshGroupChips()
+        // 首屏就要把默认分组的二级滤镜行建出来（旧代码只在点分组时才建，首屏二级行是空的）
+        buildFilterChips()
     }
 
     private fun refreshGroupChips() {
@@ -1139,6 +1190,7 @@ class PhotoEditorFragment : Fragment() {
 
     private fun loadImage(uri: Uri) {
         val ctx = context ?: return
+        val token = ++sourceToken
         lifecycleScope.launch {
             // 人体解析模型 66MB，首次要解压+加载，可能几秒；不给提示会被当成卡死
             if (_binding != null) binding.progress.visibility = View.VISIBLE
@@ -1159,28 +1211,52 @@ class PhotoEditorFragment : Fragment() {
                 toast("图片处理失败：${e.message}")
                 return@launch
             }
+            if (token != sourceToken) return@launch   // 期间又选了别的图：丢弃旧结果
             sourceBitmap = pair.first
             guide = pair.second
             if (_binding == null) return@launch
             binding.btnSave.isEnabled = true
-            // 换图：贴纸/马赛克全部重置（mask 与旧图同尺寸，不能带到新图上）
+            // 换图：全部状态重置（旧代码漏了一大批，导致工具面板/定位线/涂抹残留在新图上）
+            // 1) 工具面板与浮层全部收起
+            activeTool = null
+            binding.panelCrop.visibility = View.GONE
+            binding.panelTransform.visibility = View.GONE
+            binding.panelBorder.visibility = View.GONE
+            binding.panelMosaic.visibility = View.GONE
+            binding.panelSticker.visibility = View.GONE
+            binding.panelCollage.visibility = View.GONE
+            binding.cropOverlay.visibility = View.GONE
+            binding.maskPaint.visibility = View.GONE
+            binding.stickerLayer.visibility = View.GONE
+            binding.guideLines.visibility = View.GONE
+            removeAiEraseButton()
+            refreshToolEntries()
+            // 2) 贴纸全部清掉（位图归自己管的要回收）
             stickerItems.forEach { if (it.owned) it.bitmap.recycle() }
             stickerItems.clear()
             binding.stickerLayer.selected = -1
             binding.stickerLayer.stickers = stickerItems
-            binding.stickerLayer.visibility = View.GONE
+            // 3) 马赛克状态（mask 与旧图同尺寸，不能带到新图上）
             mosaicSpec.enabled = false
             mosaicSpec.mask = null
-            binding.maskPaint.setImageSize(pair.first.width, pair.first.height)
+            mosaicSpec.brushOnly = true
+            binding.btnMosaicFull.isSelected = false
+            binding.maskPaint.erasing = false
+            binding.btnMosaicErase.isSelected = false
+            binding.btnMosaicErase.text = "涂抹"
+            // setImageSize(clear=true)：同尺寸也清掉旧涂抹
+            binding.maskPaint.setImageSize(pair.first.width, pair.first.height, clear = true)
             binding.cropOverlay.setImageSize(pair.first.width, pair.first.height)
+            binding.cropOverlay.reset()
             binding.stickerLayer.setImageSize(pair.first.width, pair.first.height)
             binding.guideLines.setImageSize(pair.first.width, pair.first.height)
             manualHemY = null
             manualAnkleY = null
+            renderErrorShown = false
             updateDetectHint()
             renderPreview()
             } finally {
-                if (_binding != null) binding.progress.visibility = View.GONE
+                if (_binding != null && token == sourceToken) binding.progress.visibility = View.GONE
             }
         }
     }
@@ -1263,12 +1339,22 @@ class PhotoEditorFragment : Fragment() {
                 if (pendingRender) {
                     pendingRender = false
                     renderPreview()
+                } else if (pendingSave) {
+                    // 渲染中进行过保存：等这帧出来再保存，避免存到上一帧的旧图
+                    pendingSave = false
+                    saveCurrent()
                 }
             }
         }
     }
 
     private fun saveCurrent() {
+        if (rendering) {
+            // 渲染在途：等这帧渲染完自动保存（旧代码直接存 lastResult，存的是旧帧）
+            pendingSave = true
+            toast("正在处理，马上保存")
+            return
+        }
         val bmp = lastResult ?: run {
             toast("还没有可保存的结果")
             return
@@ -1293,13 +1379,12 @@ class PhotoEditorFragment : Fragment() {
     override fun onDestroy() {
         super.onDestroy()
         renderJob?.cancel()
-        // GL 资源必须在它自己的线程上释放
-        try {
-            runBlocking { withContext(glDispatcher) { engine.release() } }
-        } catch (_: Exception) {}
-        try {
-            if (::mp.isInitialized) mp.close()
-        } catch (_: Exception) {}
+        // GL/MediaPipe 释放改成“即发即弃”：排到 GL 队列尾部异步执行，
+        // 不再用 runBlocking 卡主线程（Fragment 销毁时主线程一卡就是几百毫秒）
+        releaseScope.launch {
+            try { engine.release() } catch (_: Exception) {}
+            try { if (::mp.isInitialized) mp.close() } catch (_: Exception) {}
+        }
         try { glDispatcher.close() } catch (_: Exception) {}
     }
 }

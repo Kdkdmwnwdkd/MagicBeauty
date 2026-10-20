@@ -44,8 +44,9 @@ class LocalEditEngine {
     private var fboB = 0
     private var fboC = 0
 
-    // 贴纸纹理缓存：Bitmap 引用 -> 纹理名（拖滑块时避免每帧重传）
-    private val stickerTex = HashMap<Bitmap, Int>()
+    // 贴纸纹理缓存：Bitmap 引用 -> 纹理名（拖滑块时避免每帧重传）。
+    // accessOrder=true：get/put 都算访问，淘汰时先丢最久未用的那张。
+    private val stickerTex = java.util.LinkedHashMap<Bitmap, Int>(16, 0.75f, true)
     // 马赛克 mask 纹理缓存（mask 是同一实例反复重画，按版本号判断重传）
     private var texMosaic = 0
     private var mosaicRef: Bitmap? = null
@@ -143,6 +144,16 @@ class LocalEditEngine {
         canvas.drawBitmap(b, m, null)
         texSrc = uploadTexture(flipped, texSrc)
         ensureTargets(width, height)
+        // 换图 = 旧马赛克 mask 全部作废（尺寸/内容都不再匹配），必须清缓存状态，
+        // 否则用户给新图涂马赛克时会看到上一张图的涂抹痕迹。
+        if (texMosaic != 0) GLES20.glDeleteTextures(1, intArrayOf(texMosaic), 0)
+        texMosaic = 0
+        mosaicRef = null
+        mosaicVer = -1
+        // 位移场缓存同时失效：引导坐标随新图重新检测，dispKey 换了自然重建，
+        // 但人体蒙版引用也要重置，逼 render 重新上传（见 render 段①）
+        maskRef = null; maskN = 0; maskOk = false
+        dispKey = ""
         return b
     }
 
@@ -191,7 +202,8 @@ class LocalEditEngine {
         val hasMask = pm != null && guide.maskSize > 0
         if (hasMask && maskRef !== pm) {
             texMask = uploadMask(pm!!, guide.maskSize, texMask)
-            maskRef = pm
+            // 上传失败（返回 0，蒙版几乎全空）时不锁定引用，下次渲染还会重试
+            maskRef = if (texMask != 0) pm else null
             maskN = guide.maskSize
             maskOk = texMask != 0
             bindTex(warpProg, "uTex", texSrc, 0)   // 恢复单元 0
@@ -228,12 +240,17 @@ class LocalEditEngine {
                 (eff.hipSlim > 0.001f && guide.hipOk) ||
                 (eff.legSlim > 0.001f && guide.legSlimOk)
         if (dispOn) {
+            // 缓存键必须覆盖 WarpField.build 读到的每一个引导字段，
+            // 漏一个就会在手动拖定位线/重新检测时沿用旧位移场（形变对不上位置）
             val key = "${eff.legStretch}|${eff.waistSlim}|${eff.shoulderSlim}|${eff.armSlim}|" +
                     "${eff.hipSlim}|${eff.legSlim}|${guide.legTopResolved}|" +
-                    "${guide.ankleY}|${guide.waistY}|${guide.bodyHalfW}|" +
+                    "${guide.ankleY}|${guide.manualAnkleY ?: -1f}|${guide.manualHemY ?: -1f}|" +
+                    "${guide.waistY}|${guide.bodyHalfW}|${guide.bodyCenter.x}|" +
+                    "${guide.bodyTopY}|${guide.bodyBottomY}|" +
                     "${guide.shoulderY}|${guide.shoulderHalfW}|${guide.armTopY}|${guide.armBotY}|" +
                     "${guide.armHalfW}|${guide.armCxL}|${guide.armCxR}|${guide.hipY}|" +
                     "${guide.hipHalfW}|${guide.legHalfW}|" +
+                    "${guide.clothesHalfW}|${guide.clothesEdgeLift}|${guide.maskSize}|" +
                     "${System.identityHashCode(guide.personMask)}"
             if (key != dispKey) {
                 val field = WarpField.build(guide, eff, aspect)
@@ -330,7 +347,7 @@ class LocalEditEngine {
         stickers.forEachIndexed { i, st ->
             var tex = stickerTex[st.bitmap]
             if (tex == null) {
-                // 缓存上限 16 张，超出淘汰最旧的（Bitmap 作 key，引用相等才复用）
+                // 缓存上限 16 张，淘汰最久未用的（accessOrder 的 LinkedHashMap）
                 if (stickerTex.size >= 16) {
                     val oldest = stickerTex.keys.firstOrNull()
                     if (oldest != null) {
@@ -339,7 +356,14 @@ class LocalEditEngine {
                         }
                     }
                 }
-                tex = uploadTexture(st.bitmap, 0)
+                // OVERLAY_FRAG 的贴纸采样期望 v=1 对应位图顶行（与 uBase 同向），
+                // 而 uploadTexture 不翻转、纹理 v=0 落在位图首行——必须先垂直翻转再上传，
+                // 否则贴纸整体上下颠倒（与 uBase 的翻转规则保持一致）
+                val flipped = Bitmap.createBitmap(st.bitmap.width, st.bitmap.height, Bitmap.Config.ARGB_8888)
+                val cv = Canvas(flipped)
+                cv.drawBitmap(st.bitmap, Matrix().apply { postScale(1f, -1f, st.bitmap.width / 2f, st.bitmap.height / 2f) }, null)
+                tex = uploadTexture(flipped, 0)
+                flipped.recycle()   // 纹理已在 GPU 侧，临时位图立即释放
                 stickerTex[st.bitmap] = tex
             }
             bindTex(overlayProg, "uLayers[$i]", tex, 2 + i)
@@ -362,6 +386,8 @@ class LocalEditEngine {
         if (texMosaic != 0) GLES20.glDeleteTextures(1, intArrayOf(texMosaic), 0)
         stickerTex.values.forEach { GLES20.glDeleteTextures(1, intArrayOf(it), 0) }
         stickerTex.clear()
+        if (warpProg != 0) GLES20.glDeleteProgram(warpProg)
+        if (adjustProg != 0) GLES20.glDeleteProgram(adjustProg)
         if (overlayProg != 0) GLES20.glDeleteProgram(overlayProg)
         if (fboA != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboA), 0)
         if (fboB != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboB), 0)
@@ -372,6 +398,7 @@ class LocalEditEngine {
         EGL14.eglTerminate(eglDisplay)
         initialized = false
         texSrc = 0; texA = 0; texB = 0; texC = 0; texMask = 0; texDisp = 0; texCurve = 0; texMosaic = 0
+        warpProg = 0; adjustProg = 0; overlayProg = 0
         maskRef = null; maskN = 0; maskOk = false; dispKey = ""
         curveRef = null; curveVer = -1
         mosaicRef = null; mosaicVer = -1

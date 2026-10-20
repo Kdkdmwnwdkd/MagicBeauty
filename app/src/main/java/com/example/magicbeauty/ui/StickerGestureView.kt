@@ -73,6 +73,8 @@ class StickerGestureView @JvmOverloads constructor(
 
     // 手势状态
     private var mode = 0 // 0=无 1=拖动 2=双指
+    /** 发起拖动的那根手指（多点触控时避免抬手后指针错位） */
+    private var dragPointerId = MotionEvent.INVALID_POINTER_ID
     private var lastX = 0f
     private var lastY = 0f
     private var startDist = 0f
@@ -86,6 +88,8 @@ class StickerGestureView @JvmOverloads constructor(
 
     fun setImageSize(w: Int, h: Int) {
         imgW = w; imgH = h
+        updateImgRect()
+        invalidate()
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -93,12 +97,15 @@ class StickerGestureView @JvmOverloads constructor(
         updateImgRect()
     }
 
+    /** contain 映射（与 fitCenter ImageView 一致：遵守 padding） */
     private fun updateImgRect() {
-        val scale = minOf(width.toFloat() / imgW, height.toFloat() / imgH)
+        val ew = (width - paddingLeft - paddingRight).coerceAtLeast(1f)
+        val eh = (height - paddingTop - paddingBottom).coerceAtLeast(1f)
+        val scale = minOf(ew / imgW, eh / imgH)
         val dispW = imgW * scale
         val dispH = imgH * scale
-        val offX = (width - dispW) / 2f
-        val offY = (height - dispH) / 2f
+        val offX = paddingLeft + (ew - dispW) / 2f
+        val offY = paddingTop + (eh - dispH) / 2f
         imgRect.set(offX, offY, offX + dispW, offY + dispH)
     }
 
@@ -159,9 +166,11 @@ class StickerGestureView @JvmOverloads constructor(
                 if (hit >= 0) {
                     selected = hit
                     mode = 1
+                    dragPointerId = ev.getPointerId(0)
                     lastX = ev.x; lastY = ev.y
                 } else {
                     mode = 0
+                    dragPointerId = MotionEvent.INVALID_POINTER_ID
                     selected = -1
                     onBackgroundTap?.invoke()
                 }
@@ -185,11 +194,15 @@ class StickerGestureView @JvmOverloads constructor(
                 if (st == null) { mode = 0; return true }
                 if (abs(ev.x - downX) > 6f || abs(ev.y - downY) > 6f) moved = true
                 if (mode == 1) {
-                    val dx = ev.x - lastX
-                    val dy = ev.y - lastY
+                    // 只跟随发起拖动的那根手指（pointerId 可能在抬手后错位）
+                    val idx = if (dragPointerId != MotionEvent.INVALID_POINTER_ID)
+                        ev.findPointerIndex(dragPointerId) else -1
+                    if (idx < 0) return true
+                    val dx = ev.getX(idx) - lastX
+                    val dy = ev.getY(idx) - lastY
                     st.cx = (st.cx + dx / imgRect.width()).coerceIn(0f, 1f)
                     st.cy = (st.cy + dy / imgRect.height()).coerceIn(0f, 1f)
-                    lastX = ev.x; lastY = ev.y
+                    lastX = ev.getX(idx); lastY = ev.getY(idx)
                     onStickerChanged?.invoke()
                 } else if (mode == 2 && ev.pointerCount >= 2) {
                     val d = dist(ev)
@@ -197,8 +210,42 @@ class StickerGestureView @JvmOverloads constructor(
                     if (startDist > 1f) {
                         st.scale = (startScale * d / startDist).coerceIn(0.05f, 1.5f)
                     }
-                    st.rotation = startRot + (a - startAngle)
+                    // 角度差归一化到 ±π：跨过 ±180° 时不能跳变（否则贴纸瞬间反转）
+                    var da = a - startAngle
+                    while (da > Math.PI) da -= (2 * Math.PI).toFloat()
+                    while (da < -Math.PI) da += (2 * Math.PI).toFloat()
+                    st.rotation = startRot + da
                     onStickerChanged?.invoke()
+                }
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                // 双指中抬起一根：若主动拖动的那根还在，降级为单指拖动续接；
+                // 否则结束手势（旧代码没有这一分支，mode 卡在 2，之后完全失灵）
+                if (mode == 2) {
+                    val idx = ev.action shr 8
+                    val upId = ev.getPointerId(idx)
+                    if (upId == dragPointerId) {
+                        // 拖动发起指抬了：换剩下那根续接
+                        val remain = if (idx == 0) 1 else 0
+                        dragPointerId = ev.getPointerId(remain)
+                    }
+                    if (ev.pointerCount > 2) {
+                        // 还有第三根手指：保持双指，重新取基准
+                        startDist = dist(ev)
+                        startAngle = angle(ev)
+                        stickers.getOrNull(selected)?.let {
+                            startScale = it.scale
+                            startRot = it.rotation
+                        }
+                    } else {
+                        mode = 1
+                        // 续接单指拖动：基准必须刷新成当前拖动手指的位置，
+                        // 否则下一帧按 mode 2 之前的老基准算 dx，贴纸会跳变
+                        val di = ev.findPointerIndex(dragPointerId)
+                        if (di >= 0) { lastX = ev.getX(di); lastY = ev.getY(di) }
+                    }
                 }
                 invalidate()
                 return true
@@ -212,6 +259,7 @@ class StickerGestureView @JvmOverloads constructor(
                     onStickerTap?.invoke(selected, ev.x, ev.y)
                 }
                 mode = 0
+                dragPointerId = MotionEvent.INVALID_POINTER_ID
                 invalidate()
                 return true
             }

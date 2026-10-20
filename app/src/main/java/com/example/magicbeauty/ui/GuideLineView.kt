@@ -55,10 +55,17 @@ class GuideLineView @JvmOverloads constructor(
         invalidate()
     }
 
-    /** 用自动检测值初始化两条线 */
+    /** 用自动检测值初始化两条线（校验顺序：裙摆必须在脚踝上方至少 0.03） */
     fun initFrom(autoHem: Float, autoAnkle: Float) {
-        hemY = autoHem.coerceIn(0.02f, 0.98f)
-        ankleY = autoAnkle.coerceIn(0.01f, 0.96f)
+        var hem = autoHem.coerceIn(0.02f, 0.98f)
+        var ank = autoAnkle.coerceIn(0.01f, 0.96f)
+        if (hem < ank + 0.03f) {
+            // 检测值本身不满足顺序约束时，以脚踝为基准把裙摆顶上去
+            hem = (ank + 0.03f).coerceAtMost(0.995f)
+            ank = (hem - 0.03f).coerceAtLeast(0.005f)
+        }
+        hemY = hem
+        ankleY = ank
         invalidate()
     }
 
@@ -68,13 +75,14 @@ class GuideLineView @JvmOverloads constructor(
     }
 
     private fun updateImgRect() {
-        val scale = min(width.toFloat() / imgW, height.toFloat() / imgH)
+        val ew = (width - paddingLeft - paddingRight).coerceAtLeast(1f)
+        val eh = (height - paddingTop - paddingBottom).coerceAtLeast(1f)
+        val scale = min(ew / imgW, eh / imgH)
         val dispW = imgW * scale
         val dispH = imgH * scale
-        imgRect.set(
-            (width - dispW) / 2f, (height - dispH) / 2f,
-            (width + dispW) / 2f, (height + dispH) / 2f
-        )
+        val offX = paddingLeft + (ew - dispW) / 2f
+        val offY = paddingTop + (eh - dispH) / 2f
+        imgRect.set(offX, offY, offX + dispW, offY + dispH)
     }
 
     /** GL y → 屏幕 y */
