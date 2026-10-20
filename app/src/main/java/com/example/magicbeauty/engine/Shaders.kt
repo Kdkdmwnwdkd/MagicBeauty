@@ -182,6 +182,20 @@ object Shaders {
         uniform float uBlur;         // 0..1 磨皮强度
         uniform float uVignette;     // 0..1 暗角
         uniform float uWhiten;       // 0..1 美白强度（只提亮肤色区域）
+        uniform float uSharpen;      // 0..1 锐化（USM）
+        uniform float uGrain;        // 0..1 颗粒
+        uniform float uHighlight;    // -1..1 高光
+        uniform float uShadow;       // -1..1 阴影
+        // HSL 六色分频：x=色相偏移(圈) y=饱和增益 z=明度偏移
+        uniform vec3  uHslR;   // 红
+        uniform vec3  uHslO;   // 橙/黄
+        uniform vec3  uHslG;   // 绿
+        uniform vec3  uHslC;   // 青
+        uniform vec3  uHslB;   // 蓝
+        uniform vec3  uHslM;   // 品红
+        // 曲线：256x1 RGB LUT 纹理
+        uniform sampler2D uCurve;
+        uniform float uHasCurve;
 
         uniform mat3  uFilterMat;    // 滤镜色彩矩阵（行主序传入）
         uniform vec3  uFilterOff;    // 滤镜偏移
@@ -198,14 +212,62 @@ object Shaders {
             return clamp(m1 * m2 * m3, 0.0, 1.0);
         }
 
+        vec3 rgb2hsv(vec3 c) {
+            vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+            vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+            vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+            float d = q.x - min(q.w, q.y);
+            float e = 1.0e-10;
+            return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+        }
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        // 单个色相的三角窗权重：center 为带中心（圈），半宽 60°
+        float bandWeight(float hue, float center) {
+            float d = abs(hue - center);
+            d = min(d, 1.0 - d);           // 色相是环形的
+            return max(0.0, 1.0 - d / 0.1667);
+        }
+
+        // HSL 六色分频：只改目标色相附近的像素
+        vec3 hslAdjust(vec3 col, float hue, float sat, float lum,
+                       vec3 pR, vec3 pO, vec3 pG, vec3 pC, vec3 pB, vec3 pM) {
+            vec3 hsv = rgb2hsv(col);
+            float h = hsv.x;
+            vec3 adj = pR * bandWeight(h, 0.000)
+                     + pO * bandWeight(h, 0.083)
+                     + pG * bandWeight(h, 0.333)
+                     + pC * bandWeight(h, 0.417)
+                     + pB * bandWeight(h, 0.667)
+                     + pM * bandWeight(h, 0.833);
+            // 没有任何一个带命中就整体跳过
+            if (dot(adj, vec3(1.0)) < 0.001 && abs(adj.x) < 0.001) return col;
+            hsv.x = fract(h + adj.x + 1.0);            // 色相偏移
+            hsv.y = clamp(hsv.y * adj.y, 0.0, 1.0);    // 饱和
+            hsv.z = clamp(hsv.z + adj.z, 0.0, 1.0);    // 明度
+            // 按权重与原图混合，带边缘平滑过渡
+            float w = max(max(adj.x, abs(adj.y - 1.0)), abs(adj.z));
+            return mix(col, hsv2rgb(hsv), clamp(w, 0.0, 1.0));
+        }
+
+        // 稳定 hash 噪声（颗粒用，不随时间变化，保证预览/保存一致）
+        float hash(vec2 p) {
+            return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+        }
+
         void main() {
             vec2 uv = vUV;
             vec3 c0 = texture2D(uTex, uv).rgb;
             vec3 col = c0;
 
             // ---------- 磨皮：边缘保持的双边滤波（8 邻域） ----------
-            // 旧版是 5 点均值模糊，会把眼睛、发丝一起糊掉，看起来“假滑”。
-            // 这里每个采样点按“与中心的颜色差”加权：颜色差越大权重越小，
+            // 旧版是 5 点均值模糊，会把眼睛、发丝一起糊掉，看起来"假滑"。
+            // 这里每个采样点按"与中心的颜色差"加权：颜色差越大权重越小，
             // 所以皮肤被磨平，五官/发丝边缘保留。
             if (uBlur > 0.001) {
                 float r = 1.0 + uBlur * 2.2;
@@ -240,6 +302,18 @@ object Shaders {
                 col = mix(c0, blur, uBlur * m);
             }
 
+            // ---------- 锐化：USM（原图 - 邻域均值），放在调色前 ----------
+            // 皮肤上减弱一半，避免放大毛孔和噪点
+            if (uSharpen > 0.001) {
+                vec3 n = texture2D(uTex, uv + vec2(uTexel.x, 0.0)).rgb;
+                n += texture2D(uTex, uv - vec2(uTexel.x, 0.0)).rgb;
+                n += texture2D(uTex, uv + vec2(0.0, uTexel.y)).rgb;
+                n += texture2D(uTex, uv - vec2(0.0, uTexel.y)).rgb;
+                n *= 0.25;
+                float sm = mix(1.0, 0.55, skinMask(c0));
+                col += (c0 - n) * uSharpen * 1.6 * sm;
+            }
+
             // 亮度 / 对比度
             col += uBrightness;
             col = (col - 0.5) * uContrast + 0.5;
@@ -262,8 +336,35 @@ object Shaders {
                 col = mix(col, vec3(luma(col)), w * 0.10);
             }
 
+            // ---------- 高光 / 阴影（分离调节） ----------
+            if (abs(uHighlight) > 0.001 || abs(uShadow) > 0.001) {
+                float ly = luma(col);
+                float hw = smoothstep(0.45, 0.90, ly);   // 高光区权重
+                float sw = 1.0 - smoothstep(0.12, 0.50, ly); // 阴影区权重
+                col += uHighlight * 0.16 * hw;
+                col += uShadow * 0.16 * sw;
+                col = clamp(col, 0.0, 1.0);
+            }
+
+            // ---------- HSL 六色分频 ----------
+            col = hslAdjust(col, 0.0, 1.0, 0.0, uHslR, uHslO, uHslG, uHslC, uHslB, uHslM);
+
+            // ---------- 曲线（RGB LUT） ----------
+            if (uHasCurve > 0.5) {
+                col = texture2D(uCurve, vec2(clamp(col.r, 0.0, 1.0), 0.5)).rgb;
+                col.g = texture2D(uCurve, vec2(clamp(col.g, 0.0, 1.0), 0.5)).g;
+                col.b = texture2D(uCurve, vec2(clamp(col.b, 0.0, 1.0), 0.5)).b;
+            }
+
             // 滤镜（色彩矩阵 + 偏移）
             col = clamp(uFilterMat * col + uFilterOff, 0.0, 1.0);
+
+            // ---------- 颗粒：中间调最明显的细噪点 ----------
+            if (uGrain > 0.001) {
+                float n = hash(uv * 512.0) - 0.5;
+                float mid = 1.0 - abs(luma(col) - 0.5) * 1.6;  // 中间调权重
+                col += n * uGrain * 0.14 * clamp(mid, 0.15, 1.0);
+            }
 
             // 暗角（smoothstep 必须 edge0 < edge1）
             if (uVignette > 0.001) {
@@ -273,6 +374,66 @@ object Shaders {
             }
 
             gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+        }
+    """
+
+    // ---- ③ 叠加段：贴纸/文字层 + 马赛克笔涂抹 ----
+    // 在 Adjust 之后按屏幕空间混合。贴纸层最多 4 层（数组下标是 for 循环常数，GLES2 合法）。
+    const val OVERLAY_FRAG = """
+        precision mediump float;
+        varying vec2 vUV;
+        uniform sampler2D uBase;        // Adjust 输出
+        uniform float uAspectB;         // 宽高比（>=1）
+        uniform float uLayerCount;
+        uniform sampler2D uLayers[4];   // 贴纸/文字位图（RGBA）
+        uniform vec4  uLayerT[4];       // cx, cy, scale, rotation（cx/cy 为 y 向下的图像坐标）
+        uniform float uMosaicOn;
+        uniform float uMosaicBlock;
+        uniform float uMosaicFull;    // 1 = 整图生效（忽略 mask）
+        uniform sampler2D uMosaicMask;  // 白色 = 涂抹区
+        uniform float uBorderW;         // 边框宽（相对图像高度，0 = 无边框）
+        uniform vec3  uBorderCol;       // 边框颜色
+
+        void main() {
+            vec2 uv = vUV;
+            vec3 col = texture2D(uBase, uv).rgb;
+
+            // ---------- 马赛克：块中心采样 + mask 混合 ----------
+            if (uMosaicOn > 0.5) {
+                float m = uMosaicFull > 0.5 ? 1.0 : texture2D(uMosaicMask, uv).r;
+                vec2 block = vec2(uMosaicBlock * uAspectB, uMosaicBlock);
+                vec2 mv = (floor(uv / block) + 0.5) * block;
+                col = mix(col, texture2D(uBase, mv).rgb, clamp(m, 0.0, 1.0));
+            }
+
+            // ---------- 边框：q 空间（y 满幅=1）四条边带 ----------
+            if (uBorderW > 0.0) {
+                vec2 bq = vec2(vUV.x * uAspectB, vUV.y);
+                float w = uBorderW;
+                if (bq.x < w || bq.x > uAspectB - w || bq.y < w || bq.y > 1.0 - w) {
+                    col = uBorderCol;
+                }
+            }
+
+            // ---------- 贴纸层 ----------
+            for (int i = 0; i < 4; i++) {
+                if (float(i) >= uLayerCount) break;
+                vec4 t = uLayerT[i];
+                // 图像坐标(y 向下) -> GL 坐标(y 向上)
+                vec2 center = vec2(t.x, 1.0 - t.y);
+                vec2 q = (uv - center) * vec2(uAspectB, 1.0);
+                float cs = cos(t.w);
+                float sn = sin(t.w);
+                q = vec2(q.x * cs - q.y * sn, q.x * sn + q.y * cs);
+                float half = max(t.z * 0.5, 0.001);
+                vec2 lt = q / (2.0 * half) + 0.5;
+                if (lt.x >= 0.0 && lt.x <= 1.0 && lt.y >= 0.0 && lt.y <= 1.0) {
+                    vec4 s = texture2D(uLayers[i], lt);
+                    col = mix(col, s.rgb, s.a);
+                }
+            }
+
+            gl_FragColor = vec4(col, 1.0);
         }
     """
 }

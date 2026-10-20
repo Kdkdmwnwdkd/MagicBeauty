@@ -16,6 +16,23 @@ data class EditParams(
     var vignette: Float = 0f,
     var whiten: Float = 0f,      // 美白（只提亮肤色区域）
     var filterId: Int = 0,       // 滤镜预设（见 Filters.presets）
+    // 调色进阶
+    var sharpen: Float = 0f,     // 锐化 0..1（USM，边缘保持）
+    var grain: Float = 0f,       // 颗粒 0..1（中间调最明显）
+    var highlight: Float = 0f,   // 高光 -1..1（正=提亮）
+    var shadow: Float = 0f,      // 阴影 -1..1（正=提亮）
+    /** HSL 六色分频：索引 0=红 1=橙/黄 2=绿 3=青 4=蓝 5=品红。
+     *  hue: -0.5..0.5 色相偏移；sat: 0..2 饱和度增益；lum: -0.3..0.3 明度偏移 */
+    var hslHue: FloatArray = FloatArray(6),
+    var hslSat: FloatArray = FloatArray(6) { 1f },
+    var hslLum: FloatArray = FloatArray(6),
+    /** 曲线 LUT：256 项，每项 0xRRGGBB；null = 不启用 */
+    var curveLut: IntArray? = null,
+    // 边框（画框）：宽 0..0.08（相对图像高度），颜色 RGB 0..1
+    var borderWidth: Float = 0f,
+    var borderColor: FloatArray = floatArrayOf(1f, 1f, 1f),
+    /** LUT 版本号：每次编辑 +1，引擎据此判断是否需要重新上传纹理 */
+    var curveVersion: Int = 0,
     // 人脸形变
     var thinFace: Float = 0f,    // 瘦脸
     var eyeEnlarge: Float = 0f,  // 大眼
@@ -96,23 +113,32 @@ data class WarpGuide(
     // 是否真的检测到人脸/人体。没检测到就不能拿默认坐标硬套，
     // 否则“瘦脸/大眼”会落在画面中央（用户看到的就是“没对准脸”）。
     val hasFace: Boolean = false,
-    val hasPose: Boolean = false
+    val hasPose: Boolean = false,
+    /** 手动定位兜底（用户拖动引导线设定）：裙摆线/脚踝线，GL y；
+     *  非 null 时优先于检测值，且不再要求 hasPose */
+    val manualHemY: Float? = null,
+    val manualAnkleY: Float? = null
 ) {
     /**
      * 腿段上界（已按穿着决定）：长裤=胯，裙子/短裤=裙摆下沿，兜底=膝盖。
      * 裙摆比膝盖低太多（袜子、长靴被误判成裙子）时不采信，退回膝盖。
+     * 用户手动拖过裙摆线时以手动值为准。
      */
     val legTopResolved: Float
-        get() = when {
+        get() = manualHemY ?: when {
             hasClothes && clothesIsPants -> hipY
             hasClothes && (clothesHemY - ankleY) > 0.04f &&
                     clothesHemY > legTopY - 0.06f -> clothesHemY
             else -> legTopY
         }
 
-    /** 拉腿是否可用 */
+    /** 拉腿是否可用：自动检测要 hasPose；手动定位两条线齐全即可 */
     val legOk: Boolean
-        get() = hasPose && (legTopResolved - ankleY) > 0.03f && ankleY > 0.005f
+        get() = if (manualHemY != null && manualAnkleY != null) {
+            (manualHemY - manualAnkleY) > 0.03f && manualAnkleY > 0.005f
+        } else {
+            hasPose && (legTopResolved - ankleY) > 0.03f && ankleY > 0.005f
+        }
 
     /** 瘦腰是否可用：腰必须在腿段上沿附近，半身照（看不到腿）不生效 */
     val waistOk: Boolean
@@ -136,7 +162,7 @@ data class WarpGuide(
     /** 瘦腿是否可用：腿段要够长，腿宽要量到 */
     val legSlimOk: Boolean
         get() = hasPose && legHalfW > 0.020f &&
-                (legTopResolved - ankleY) > 0.04f
+                (legTopResolved - (manualAnkleY ?: ankleY)) > 0.04f
 
     /** 面部重塑（鼻/唇/下巴）是否可用 */
     val faceFeatureOk: Boolean

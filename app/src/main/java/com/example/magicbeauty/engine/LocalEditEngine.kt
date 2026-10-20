@@ -25,6 +25,7 @@ class LocalEditEngine {
 
     private var warpProg = 0
     private var adjustProg = 0
+    private var overlayProg = 0
 
     private var texSrc = 0
     private var texMask = 0
@@ -33,10 +34,22 @@ class LocalEditEngine {
     private var maskOk = false
     private var texDisp = 0
     private var dispKey = ""
+    private var texCurve = 0
+    private var curveRef: IntArray? = null
+    private var curveVer = -1
     private var texA = 0   // warp 输出
     private var texB = 0   // adjust 输出
+    private var texC = 0   // overlay 输出
     private var fboA = 0
     private var fboB = 0
+    private var fboC = 0
+
+    // 贴纸纹理缓存：Bitmap 引用 -> 纹理名（拖滑块时避免每帧重传）
+    private val stickerTex = HashMap<Bitmap, Int>()
+    // 马赛克 mask 纹理缓存（mask 是同一实例反复重画，按版本号判断重传）
+    private var texMosaic = 0
+    private var mosaicRef: Bitmap? = null
+    private var mosaicVer = -1
 
     private var width = 0
     private var height = 0
@@ -96,6 +109,7 @@ class LocalEditEngine {
 
         warpProg = buildProgram(Shaders.VERTEX, Shaders.WARP_FRAG)
         adjustProg = buildProgram(Shaders.VERTEX, Shaders.ADJUST_FRAG)
+        overlayProg = buildProgram(Shaders.VERTEX, Shaders.OVERLAY_FRAG)
         initialized = true
     }
 
@@ -133,7 +147,11 @@ class LocalEditEngine {
     }
 
     /** 用当前参数渲染一帧，返回处理后的 Bitmap（已翻转回正常方向）。 */
-    fun render(params: EditParams, guide: WarpGuide = WarpGuide()): Bitmap {
+    fun render(
+        params: EditParams,
+        guide: WarpGuide = WarpGuide(),
+        overlays: OverlaySpec = OverlaySpec()
+    ): Bitmap {
         initGL()
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
 
@@ -247,12 +265,89 @@ class LocalEditEngine {
         f(adjustProg, "uBlur", params.blur)
         f(adjustProg, "uVignette", params.vignette)
         f(adjustProg, "uWhiten", params.whiten)
+        // 调色进阶：锐化/颗粒/高光/阴影
+        f(adjustProg, "uSharpen", params.sharpen)
+        f(adjustProg, "uGrain", params.grain)
+        f(adjustProg, "uHighlight", params.highlight)
+        f(adjustProg, "uShadow", params.shadow)
+        // HSL 六色分频（x=色相 y=饱和 z=明度）
+        vec3(adjustProg, "uHslR", floatArrayOf(params.hslHue[0], params.hslSat[0], params.hslLum[0]))
+        vec3(adjustProg, "uHslO", floatArrayOf(params.hslHue[1], params.hslSat[1], params.hslLum[1]))
+        vec3(adjustProg, "uHslG", floatArrayOf(params.hslHue[2], params.hslSat[2], params.hslLum[2]))
+        vec3(adjustProg, "uHslC", floatArrayOf(params.hslHue[3], params.hslSat[3], params.hslLum[3]))
+        vec3(adjustProg, "uHslB", floatArrayOf(params.hslHue[4], params.hslSat[4], params.hslLum[4]))
+        vec3(adjustProg, "uHslM", floatArrayOf(params.hslHue[5], params.hslSat[5], params.hslLum[5]))
+        // 曲线 LUT（内容没变就复用纹理）
+        val lut = params.curveLut
+        if (lut != null && lut.size >= 256 && params.curveVersion != curveVer) {
+            texCurve = uploadCurve(lut, texCurve)
+            curveRef = lut
+            curveVer = params.curveVersion
+        }
+        f(adjustProg, "uHasCurve", if (lut != null && lut.size >= 256 && texCurve != 0) 1f else 0f)
+        bindTex(adjustProg, "uCurve", if (texCurve != 0) texCurve else texA, 3)
         val preset = Filters.get(params.filterId)
         mat3(adjustProg, "uFilterMat", preset.m)
         vec3(adjustProg, "uFilterOff", preset.off)
         drawQuad()
 
-        return readFramebuffer(fboB)
+        // —— 段③：Overlay（贴纸/文字层 + 马赛克笔 + 边框）——
+        // 没有叠加内容就跳过，Adjust 的输出就是最终结果
+        if (!overlays.active && params.borderWidth <= 0f) {
+            return readFramebuffer(fboB)
+        }
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboC)
+        GLES20.glViewport(0, 0, width, height)
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glUseProgram(overlayProg)
+        bindQuad(overlayProg)
+        bindTex(overlayProg, "uBase", texB, 0)
+        f(overlayProg, "uAspectB", aspect)
+
+        // 边框
+        f(overlayProg, "uBorderW", params.borderWidth.coerceIn(0f, 0.08f))
+        vec3(overlayProg, "uBorderCol", params.borderColor)
+
+        // 马赛克
+        val mos = overlays.mosaic
+        f(overlayProg, "uMosaicOn", if (mos.enabled) 1f else 0f)
+        f(overlayProg, "uMosaicBlock", mos.block.coerceIn(0.008f, 0.2f))
+        f(overlayProg, "uMosaicFull", if (mos.enabled && !mos.brushOnly) 1f else 0f)
+        val mask = if (mos.enabled && mos.brushOnly) mos.mask else null
+        if (mask != null && (mask !== mosaicRef || mos.maskVersion != mosaicVer)) {
+            texMosaic = uploadMaskFlipped(mask, texMosaic)
+            mosaicRef = mask
+            mosaicVer = mos.maskVersion
+        }
+        bindTex(overlayProg, "uMosaicMask", if (texMosaic != 0) texMosaic else texB, 1)
+
+        // 贴纸层（最多 4 层）。上传走纹理单元 7，避免覆盖单元 0 上的 uBase
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE7)
+        val stickers = overlays.stickers.take(4)
+        f(overlayProg, "uLayerCount", stickers.size.toFloat())
+        stickers.forEachIndexed { i, st ->
+            var tex = stickerTex[st.bitmap]
+            if (tex == null) {
+                // 缓存上限 16 张，超出淘汰最旧的（Bitmap 作 key，引用相等才复用）
+                if (stickerTex.size >= 16) {
+                    val oldest = stickerTex.keys.firstOrNull()
+                    if (oldest != null) {
+                        stickerTex.remove(oldest)?.let { t ->
+                            GLES20.glDeleteTextures(1, intArrayOf(t), 0)
+                        }
+                    }
+                }
+                tex = uploadTexture(st.bitmap, 0)
+                stickerTex[st.bitmap] = tex
+            }
+            bindTex(overlayProg, "uLayers[$i]", tex, 2 + i)
+            f4(overlayProg, "uLayerT[$i]", st.cx, st.cy, st.scale, st.rotation)
+        }
+        drawQuad()
+
+        return readFramebuffer(fboC)
     }
 
     fun release() {
@@ -260,18 +355,27 @@ class LocalEditEngine {
         if (texSrc != 0) GLES20.glDeleteTextures(1, intArrayOf(texSrc), 0)
         if (texMask != 0) GLES20.glDeleteTextures(1, intArrayOf(texMask), 0)
         if (texDisp != 0) GLES20.glDeleteTextures(1, intArrayOf(texDisp), 0)
+        if (texCurve != 0) GLES20.glDeleteTextures(1, intArrayOf(texCurve), 0)
         if (texA != 0) GLES20.glDeleteTextures(1, intArrayOf(texA), 0)
         if (texB != 0) GLES20.glDeleteTextures(1, intArrayOf(texB), 0)
+        if (texC != 0) GLES20.glDeleteTextures(1, intArrayOf(texC), 0)
+        if (texMosaic != 0) GLES20.glDeleteTextures(1, intArrayOf(texMosaic), 0)
+        stickerTex.values.forEach { GLES20.glDeleteTextures(1, intArrayOf(it), 0) }
+        stickerTex.clear()
+        if (overlayProg != 0) GLES20.glDeleteProgram(overlayProg)
         if (fboA != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboA), 0)
         if (fboB != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboB), 0)
+        if (fboC != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboC), 0)
         EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
         EGL14.eglDestroyContext(eglDisplay, eglContext)
         EGL14.eglDestroySurface(eglDisplay, eglSurface)
         EGL14.eglTerminate(eglDisplay)
         initialized = false
-        texSrc = 0; texA = 0; texB = 0; texMask = 0; texDisp = 0
+        texSrc = 0; texA = 0; texB = 0; texC = 0; texMask = 0; texDisp = 0; texCurve = 0; texMosaic = 0
         maskRef = null; maskN = 0; maskOk = false; dispKey = ""
-        fboA = 0; fboB = 0
+        curveRef = null; curveVer = -1
+        mosaicRef = null; mosaicVer = -1
+        fboA = 0; fboB = 0; fboC = 0
         targetsW = 0; targetsH = 0
         try { flipBitmap?.recycle() } catch (_: Exception) {}
         flipBitmap = null; flipCanvas = null
@@ -285,10 +389,13 @@ class LocalEditEngine {
         if (targetsW == w && targetsH == h && texA != 0 && texB != 0 && fboA != 0 && fboB != 0) return
         if (texA != 0) GLES20.glDeleteTextures(1, intArrayOf(texA), 0)
         if (texB != 0) GLES20.glDeleteTextures(1, intArrayOf(texB), 0)
+        if (texC != 0) GLES20.glDeleteTextures(1, intArrayOf(texC), 0)
         if (fboA != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboA), 0)
         if (fboB != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboB), 0)
+        if (fboC != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboC), 0)
         val a = createTarget(w, h); texA = a.first; fboA = a.second
         val b = createTarget(w, h); texB = b.first; fboB = b.second
+        val c = createTarget(w, h); texC = c.first; fboC = c.second
         targetsW = w; targetsH = h
     }
 
@@ -408,6 +515,34 @@ class LocalEditEngine {
         return tex[0]
     }
 
+    /** 上传曲线 LUT（256x1 RGB；每项 0xRRGGBB）。 */
+    private fun uploadCurve(lut: IntArray, reuse: Int): Int {
+        val tex = IntArray(1)
+        if (reuse == 0) GLES20.glGenTextures(1, tex, 0) else tex[0] = reuse
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE3)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        val buf = ByteBuffer.allocateDirect(256 * 4).order(ByteOrder.nativeOrder())
+        for (i in 0 until 256) {
+            val p = lut[i]
+            buf.put((p shr 16 and 0xff).toByte())
+            buf.put((p shr 8 and 0xff).toByte())
+            buf.put((p and 0xff).toByte())
+            buf.put(255.toByte())
+        }
+        buf.position(0)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, 256, 1, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+        )
+        // 曲线采样必须关闭线性插值：LUT 是分段函数，插值会把折角磨圆
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        return tex[0]
+    }
+
     private fun readFramebuffer(fbo: Int): Bitmap {
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
         val need = width * height * 4
@@ -487,6 +622,45 @@ class LocalEditEngine {
 
     private fun f(prog: Int, name: String, x: Float, y: Float) {
         GLES20.glUniform2f(GLES20.glGetUniformLocation(prog, name), x, y)
+    }
+
+    private fun f4(prog: Int, name: String, x: Float, y: Float, z: Float, w: Float) {
+        GLES20.glUniform4f(GLES20.glGetUniformLocation(prog, name), x, y, z, w)
+    }
+
+    /**
+     * 上传马赛克涂抹 mask（Bitmap，白色=涂抹区）。
+     * 位图是 y 向下的，纹理 v=0 在底部，按行翻转；mask 值取 R 通道。
+     */
+    private fun uploadMaskFlipped(bmp: Bitmap, reuse: Int): Int {
+        val w = bmp.width
+        val h = bmp.height
+        val px = IntArray(w * h)
+        bmp.getPixels(px, 0, w, 0, 0, w, h)
+        val tex = IntArray(1)
+        if (reuse == 0) GLES20.glGenTextures(1, tex, 0) else tex[0] = reuse
+        // 绑到单元 1：bindTex(uMosaicMask, 1) 随后会重新绑一次，互不影响
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        val buf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
+        for (y in 0 until h) {
+            val srcRow = (h - 1 - y) * w
+            for (x in 0 until w) {
+                val v = (px[srcRow + x] shr 16) and 0xff   // 白色=255
+                buf.put(v.toByte()); buf.put(v.toByte()); buf.put(v.toByte()); buf.put(255.toByte())
+            }
+        }
+        buf.position(0)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+        )
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        return tex[0]
     }
 
     /** 3x3 色彩矩阵。我们的矩阵都是对称阵，行/列主序一致，直接用 transpose=false。 */

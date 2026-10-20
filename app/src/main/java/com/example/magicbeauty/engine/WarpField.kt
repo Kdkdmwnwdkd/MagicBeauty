@@ -48,7 +48,7 @@ object WarpField {
 
         // ---- 拉腿参数 ----
         val legTop = guide.legTopResolved
-        val ankle = guide.ankleY
+        val ankle = guide.manualAnkleY ?: guide.ankleY
         val hemHalf = (guide.clothesHalfW.takeIf { it > 0.05f } ?: guide.bodyHalfW)
             .coerceAtLeast(0.05f)
         // 目标增高量（画面高比例），逐点再换算成该列的拉伸倍率：

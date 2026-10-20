@@ -16,6 +16,18 @@ import android.net.Uri
  */
 object BitmapUtils {
 
+    /** 从字节数组解码位图（AI 接口返回的 PNG/JPEG）。上限 4096，防恶意大图 OOM。 */
+    fun fromBytes(bytes: ByteArray): Bitmap? {
+        if (bytes.isEmpty()) return null
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        val maxDim = maxOf(opts.outWidth, opts.outHeight)
+        var sample = 1
+        while (maxDim / sample > 4096) sample *= 2
+        val real = BitmapFactory.Options().apply { inSampleSize = sample }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, real)
+    }
+
     fun decodeSampled(context: Context, uri: Uri, maxDim: Int = 2048): Bitmap? {
         // 1) 先只读尺寸
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

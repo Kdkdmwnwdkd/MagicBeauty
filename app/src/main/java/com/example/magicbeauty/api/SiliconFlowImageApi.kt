@@ -39,6 +39,14 @@ class SiliconFlowImageApi {
      * @param prompt 描述想要的发型/发丝
      */
     suspend fun generateHair(imageBytes: ByteArray, prompt: String): ByteArray =
+        edit(imageBytes, prompt)
+
+    /**
+     * 通用图像编辑（AI 消除 / 修复 / 扩图都走这里）：
+     * 原图 + 提示词 -> 结果图字节。模型只会“改图”，不会扩尺寸，
+     * 扩图要自己先把画布pad大再让模型补内容（见 AiTools.padForExpand）。
+     */
+    suspend fun edit(imageBytes: ByteArray, prompt: String): ByteArray =
         withContext(Dispatchers.IO) {
             val key = ApiConfig.siliconFlowKey
             require(key.isNotBlank()) {
