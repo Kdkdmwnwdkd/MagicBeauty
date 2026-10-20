@@ -48,7 +48,7 @@ object Shaders {
         uniform float uBodyHalfW;    // 半腰宽（按图片宽度归一化）
         uniform float uWaistY;       // 腰线
         uniform float uWaistSlim;    // 0..1 瘦腰
-        uniform float uHipY;         // 胯（腿段上界）
+        uniform float uHipY;         // 腿段上界（有膝盖时=膝盖，否则=胯）
         uniform float uAnkleY;       // 脚踝（腿段下界）
         uniform float uLegStretch;   // 0..0.18 拉腿
 

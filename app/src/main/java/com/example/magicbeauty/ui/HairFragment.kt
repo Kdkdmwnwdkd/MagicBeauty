@@ -1,5 +1,6 @@
 package com.example.magicbeauty.ui
 
+import com.example.magicbeauty.MainActivity
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -64,6 +65,8 @@ class HairFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        // 左上角「≡」打开侧边抽屉（放在各自页面里最稳，不依赖 Activity 反射查 View）
+        binding.btnMenu.setOnClickListener { (activity as? MainActivity)?.openDrawer() }
         binding.btnPick.setOnClickListener { pickImage.launch("image/*") }
         binding.btnGen.setOnClickListener { generate() }
         binding.btnSave.setOnClickListener { save() }

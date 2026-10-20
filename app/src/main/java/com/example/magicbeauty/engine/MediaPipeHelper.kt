@@ -94,11 +94,20 @@ class MediaPipeHelper(context: Context) {
                 val hipHalf = dist(p[23], p[24]) / 2f
                 val shoulderHalf = dist(p[11], p[12]) * 0.50f
                 val halfW = maxOf(hipHalf, shoulderHalf)
+
+                // 腿段上界优先取膝盖：裙子、长上衣基本都在膝盖以上，
+                // 以膝盖为界它们只会跟着上半身整体上移，不会被纵向拉长。
+                // 膝盖检测不可靠（被遮挡/位置不合理）时才退回胯部。
+                val knee = mid(p[25], p[26])
+                val kneeOk = knee.y > hip.y + 0.02f && knee.y < ankle.y - 0.04f
+                val legTopImg = if (kneeOk) knee.y else hip.y
+
                 guide = guide.copy(
                     bodyCenter = WarpGuide.toGL(hip.x, waistYImg),
                     bodyHalfW = halfW.coerceIn(0.05f, 0.35f),
                     waistY = 1f - waistYImg,
                     hipY = 1f - hip.y,
+                    legTopY = 1f - legTopImg,
                     ankleY = 1f - ankle.y,
                     hasPose = true
                 )

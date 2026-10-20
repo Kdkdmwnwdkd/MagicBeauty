@@ -100,8 +100,6 @@ class MainActivity : AppCompatActivity() {
             if (existing == null) add(R.id.container, target, tag) else show(target)
         }.commitNow()
         current = target
-        // 每个页面左上角都有一个 btnMenu，统一在这里挂上开抽屉的动作
-        target.view?.findViewById<View>(R.id.btnMenu)?.setOnClickListener { openDrawer() }
     }
 
     private fun selectNavSilently(id: Int) {

@@ -38,6 +38,8 @@ data class WarpGuide(
     val bodyHalfW: Float = 0.18f,
     val waistY: Float = 0.45f,
     val hipY: Float = 0.35f,
+    /** 腿段上界：优先用膝盖（这样裙子/长上衣只会整体上移，不会被拉长） */
+    val legTopY: Float = 0.35f,
     val ankleY: Float = 0.05f,
     // 是否真的检测到人脸/人体。没检测到就不能拿默认坐标硬套，
     // 否则“瘦脸/大眼”会落在画面中央（用户看到的就是“没对准脸”）。

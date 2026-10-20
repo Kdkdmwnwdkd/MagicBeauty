@@ -1,5 +1,6 @@
 package com.example.magicbeauty.ui
 
+import com.example.magicbeauty.MainActivity
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -25,6 +26,8 @@ class SettingsFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        // 左上角「≡」打开侧边抽屉（放在各自页面里最稳，不依赖 Activity 反射查 View）
+        binding.btnMenu.setOnClickListener { (activity as? MainActivity)?.openDrawer() }
         binding.etSfKey.setText(Prefs.siliconFlowKey)
         binding.etVsEndpoint.setText(Prefs.videoSlimEndpoint)
         binding.btnSave.setOnClickListener {

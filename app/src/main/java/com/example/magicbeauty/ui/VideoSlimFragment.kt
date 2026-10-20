@@ -1,5 +1,6 @@
 package com.example.magicbeauty.ui
 
+import com.example.magicbeauty.MainActivity
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -48,6 +49,8 @@ class VideoSlimFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        // 左上角「≡」打开侧边抽屉（放在各自页面里最稳，不依赖 Activity 反射查 View）
+        binding.btnMenu.setOnClickListener { (activity as? MainActivity)?.openDrawer() }
         binding.btnPick.setOnClickListener { pickVideo.launch("video/*") }
         binding.btnProcess.setOnClickListener { process() }
         binding.btnSave.setOnClickListener { save() }
