@@ -146,8 +146,8 @@ class MediaPipeHelper(context: Context) {
                     val wrL = p[15]; val wrR = p[16]
                     // 手臂带：肩→腕的竖直范围（上下各留 1.5% 余量），
                     // 中心取肩与腕连线的中点 x（手臂弯曲时也大致压在手臂上）
-                    val armTopImg = minOf(shL.y, wrL.y, shR.y, wrR.y)
-                    val armBotImg = maxOf(shL.y, wrL.y, shR.y, wrR.y)
+                    val armTopImg = minOf(shL.y(), wrL.y(), shR.y(), wrR.y())
+                    val armBotImg = maxOf(shL.y(), wrL.y(), shR.y(), wrR.y())
                     val armHalf = maxOf(dist(shL, elL), dist(shR, elR)) * 0.30f
                     // 胯宽 = 胯骨间距 ×1.05（胯骨外侧还有肉，瘦臀要覆盖到）
 
@@ -163,8 +163,8 @@ class MediaPipeHelper(context: Context) {
                         armTopY = (1f - armTopImg + 0.015f).coerceIn(0f, 1f),
                         armBotY = (1f - armBotImg - 0.015f).coerceIn(0f, 1f),
                         armHalfW = armHalf.coerceIn(0.018f, 0.10f),
-                        armCxL = (shL.x + wrL.x) / 2f,
-                        armCxR = (shR.x + wrR.x) / 2f,
+                        armCxL = (shL.x() + wrL.x()) / 2f,
+                        armCxR = (shR.x() + wrR.x()) / 2f,
                         hasArms = true,
                         hipHalfW = (hipHalf * 1.05f).coerceIn(0.03f, 0.40f),
                         hasPose = true
