@@ -19,6 +19,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.example.magicbeauty.databinding.FragmentPhotoBinding
 import com.example.magicbeauty.engine.EditParams
+import com.example.magicbeauty.engine.CollageBuilder
 import com.example.magicbeauty.engine.Filters
 import com.example.magicbeauty.engine.LocalEditEngine
 import com.example.magicbeauty.engine.MediaPipeHelper
@@ -376,7 +377,7 @@ class PhotoEditorFragment : Fragment() {
             if (sourceBitmap != null) renderPreview()
         }
         // 拼图
-        binding.btnCollagePick.setOnClickListener { pickCollage.launch("image/*") }
+        binding.btnCollagePick.setOnClickListener { launchCollagePicker() }
         binding.stickerLayer.stickers = stickerItems
         binding.stickerLayer.onStickerChanged = { if (sourceBitmap != null) renderPreview() }
         binding.stickerLayer.onBackgroundTap = { binding.stickerLayer.selected = -1 }
@@ -400,10 +401,27 @@ class PhotoEditorFragment : Fragment() {
     /** 当前拼图模板："auto" 或 "列x行"（如 2x2） */
     private var collageTemplate = "auto"
 
+    /** 多选照片：用 StartActivityForResult + EXTRA_ALLOW_MULTIPLE（不依赖新版 activity 的 GetMultipleContent） */
     private val pickCollage = registerForActivityResult(
-        ActivityResultContracts.GetMultipleContent()
-    ) { uris ->
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        val uris = ArrayList<Uri>()
+        val data = res.data
+        if (data != null) {
+            data.clipData?.let { cd ->
+                for (i in 0 until cd.itemCount) cd.getItemAt(i).uri?.let { uris.add(it) }
+            } ?: data.data?.let { uris.add(it) }
+        }
         if (uris.isNotEmpty()) buildCollage(uris)
+    }
+
+    private fun launchCollagePicker() {
+        val intent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
+            putExtra(android.content.Intent.EXTRA_LOCAL_ONLY, false)
+        }
+        pickCollage.launch(intent)
     }
 
     private fun buildCollageTemplates() {
