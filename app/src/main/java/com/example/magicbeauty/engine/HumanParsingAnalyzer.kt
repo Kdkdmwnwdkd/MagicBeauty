@@ -149,6 +149,8 @@ class HumanParsingAnalyzer(context: Context) {
         var minX = n; var maxX = -1; var minY = n; var maxY = -1
         var clothTop = -1; var clothBottom = -1
         var skirtBottom = -1
+        var skirtTop = -1
+        var upperBottom = -1
         var pantsBottom = -1
         var shoeTop = -1
         var legTop = -1; var legBottom = -1
@@ -171,11 +173,15 @@ class HumanParsingAnalyzer(context: Context) {
                 }
                 if (isSkirt) {
                     if (y > skirtBottom) skirtBottom = y
+                    if (skirtTop < 0 || y < skirtTop) skirtTop = y
                 } else if (c == C_PANTS) {
                     if (y > pantsBottom) pantsBottom = y
                 }
                 if (c == C_SHOE_L || c == C_SHOE_R) {
                     if (shoeTop < 0 || y < shoeTop) shoeTop = y
+                }
+                if (c == C_UPPER) {
+                    if (upperBottom < 0 || y > upperBottom) upperBottom = y
                 }
                 if (c == C_LEG_L || c == C_LEG_R) {
                     if (legTop < 0 || y < legTop) legTop = y
@@ -204,12 +210,15 @@ class HumanParsingAnalyzer(context: Context) {
             1f - guide.ankleY
         } else {
             val row = when {
-                shoeTop >= 0 -> shoeTop
-                pantsBottom >= 0 -> pantsBottom
-                legBottom >= 0 -> legBottom
-                else -> maxY
+                shoeTop >= 0 -> shoeTop.toFloat() / n
+                pantsBottom >= 0 -> pantsBottom.toFloat() / n
+                // 没识别到鞋时，腿的最下沿其实是“脚底”。直接把脚底当脚踝，
+                // 整只脚和袜子都会被拉长，还会把脚下的地板一起拖上来
+                // （用户看到的“拉腿后面背景跟着动”就是这个）。
+                legBottom >= 0 -> legBottom.toFloat() / n - 0.03f
+                else -> maxY.toFloat() / n - 0.03f
             }
-            row.toFloat() / n
+            row.coerceIn(0.02f, 0.995f)
         }
         val cx = if (poseOk) guide.bodyCenter.x else ((minX + maxX) / 2f) / n
         val halfW = if (poseOk) guide.bodyHalfW
@@ -234,11 +243,21 @@ class HumanParsingAnalyzer(context: Context) {
 
         val yHip = (hemImg * n).toInt().coerceIn(0, n - 1)
         val yAnkle = (ankleImg * n).toInt().coerceIn(0, n - 1)
-        val waistGl = 1f - (hemImg - 0.04f).coerceAtLeast(0f)
+        // 腰线：上衣下沿与裙子（连衣裙）上沿的交界，才是真正的腰。
+        // 旧写法取「裙摆 - 4%」，JK 这种裙摆很低的，腰线会落到小腿上，
+        // 一拉瘦腰就是在收小腿，看着像“没反应/识别到裙子上”。
+        val waistImg = when {
+            upperBottom >= 0 && skirtTop >= 0 ->
+                (upperBottom + skirtTop) / 2f / n
+            upperBottom >= 0 -> upperBottom.toFloat() / n
+            skirtTop >= 0 -> skirtTop.toFloat() / n
+            else -> (hemImg - 0.10f).coerceAtLeast(0.05f)
+        }.coerceIn(0.08f, 0.94f)
+        val waistGl = 1f - waistImg
 
-        // 腰宽：在腰线那一行量人体的实际宽度（不用整个人体框，框里含手臂会撑太宽，
+        // 腰宽：在真正的腰线那一行量人体宽度（不用整个人体框，框里含手臂会撑太宽，
         // 瘦腰范围一宽就会把旁边的墙/门框一起拉进来）。
-        val waistRow = (hemImg * n - n * 0.05f).toInt().coerceIn(0, n - 1)
+        val waistRow = (waistImg * n).toInt().coerceIn(0, n - 1)
         var wl = n
         var wr = -1
         for (y in (waistRow - 3).coerceAtLeast(0)..(waistRow + 3).coerceAtMost(n - 1)) {
