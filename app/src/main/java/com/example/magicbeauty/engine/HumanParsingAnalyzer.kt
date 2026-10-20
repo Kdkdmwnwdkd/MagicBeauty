@@ -43,7 +43,15 @@ class HumanParsingAnalyzer(context: Context) {
         val debug: String,
         /** 人体蒙版（非背景=255），边长 maskSize，作为变形的作用域 */
         val mask: ByteArray,
-        val maskSize: Int
+        val maskSize: Int,
+        /** 以下四项是用解析结果自己推出来的位置，关键点检测失败时用来顶上 */
+        val hipY: Float,
+        val legTopY: Float,
+        val ankleY: Float,
+        val centerX: Float,
+        val waistY: Float,
+        val halfW: Float,
+        val hasBody: Boolean
     )
 
     private fun ensureSession(): OrtSession? {
@@ -72,7 +80,7 @@ class HumanParsingAnalyzer(context: Context) {
     }
 
     fun analyze(bitmap: Bitmap, guide: WarpGuide): Result? {
-        if (!guide.hasPose) return null
+        // 关键点没检测到也要继续：后面会用解析结果自己推腿的位置
         val s = ensureSession() ?: return null
         val e = env ?: return null
 
@@ -131,59 +139,103 @@ class HumanParsingAnalyzer(context: Context) {
         }
     }
 
-    /** 从 20 类结果里算出「从哪一层开始拉」 */
+    /** 从 20 类结果里算出「从哪一层开始拉」，并顺手推出腿/腰的位置（不依赖关键点） */
     private fun buildResult(cls: ByteArray, n: Int, guide: WarpGuide): Result? {
-        val hipImg = 1f - guide.hipY
-        val ankleImg = 1f - guide.ankleY
-        if (ankleImg - hipImg < 0.05f) return null
-
-        val cx = guide.bodyCenter.x
-        val halfW = guide.bodyHalfW
-        val x0 = ((cx - halfW * 0.55f) * n).toInt().coerceIn(0, n - 1)
-        val x1 = ((cx + halfW * 0.55f) * n).toInt().coerceIn(0, n - 1)
-        val yHip = (hipImg * n).toInt().coerceIn(0, n - 1)
-        val yAnkle = (ankleImg * n).toInt().coerceIn(0, n - 1)
-        if (x1 <= x0 || yAnkle <= yHip) return null
-
-        // 人体蒙版：非背景（0）都算人。拉腿/瘦腰/瘦脸只在蒙版内生效，背景完全不动。
-        val raw = ByteArray(n * n)
-        for (i in raw.indices) if (cls[i].toInt() != C_BG) raw[i] = 255.toByte()
-        // 膨胀 + 羽化：不羽化的话，腰部两侧（正是瘦腰要收的地方）权重会掉到 0，
-        // 形变被抵消，看起来就是“瘦腰没用”。
-        val mask = featherMask(raw, n)
-
-        // 统计下半身各类占比
-        var pants = 0
-        var skirt = 0
-        var total = 0
+        // ---- 1. 全图统计：人体外接框 + 各类的上下沿 ----
+        var minX = n; var maxX = -1; var minY = n; var maxY = -1
+        var clothTop = -1; var clothBottom = -1
+        var skirtBottom = -1
         var pantsBottom = -1
-        for (y in yHip..yAnkle) {
-            for (x in x0..x1) {
-                val c = cls[y * n + x].toInt()
-                total++
-                if (c == C_PANTS) {
-                    pants++
+        var shoeTop = -1
+        var legTop = -1; var legBottom = -1
+
+        for (y in 0 until n) {
+            val base = y * n
+            for (x in 0 until n) {
+                val c = cls[base + x].toInt()
+                if (c == C_BG) continue
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+
+                val isSkirt = c == C_SKIRT || c == C_DRESS || c == C_JUMPSUIT
+                val isCloth = c == C_UPPER || c == C_COAT || c == C_PANTS || isSkirt
+                if (isCloth) {
+                    if (clothTop < 0 || y < clothTop) clothTop = y
+                    if (y > clothBottom) clothBottom = y
+                }
+                if (isSkirt) {
+                    if (y > skirtBottom) skirtBottom = y
+                } else if (c == C_PANTS) {
                     if (y > pantsBottom) pantsBottom = y
                 }
-                if (c == C_SKIRT || c == C_DRESS || c == C_JUMPSUIT) skirt++
+                if (c == C_SHOE_L || c == C_SHOE_R) {
+                    if (shoeTop < 0 || y < shoeTop) shoeTop = y
+                }
+                if (c == C_LEG_L || c == C_LEG_R) {
+                    if (legTop < 0 || y < legTop) legTop = y
+                    if (y > legBottom) legBottom = y
+                }
             }
         }
-        if (total == 0) return null
-        val pantsRatio = pants.toFloat() / total
-        val skirtRatio = skirt.toFloat() / total
+        if (maxX < 0 || maxY < 0) return null
+        val areaRatio = ((maxX - minX + 1).toFloat() * (maxY - minY + 1)) / (n * n).toFloat()
+        if (areaRatio < 0.012f) return null          // 人太小，避免乱动
 
-        // 裤子：占比够高，且裤脚基本到脚踝
-        val pantsToAnkle = pantsBottom >= yAnkle - 3
-        if (pantsRatio > 0.20f && pantsToAnkle && skirtRatio < 0.05f) {
+        // ---- 2. 位置：关键点优先，没有就用解析结果自己推 ----
+        val poseOk = guide.hasPose && (guide.ankleY - guide.hipY) > 0.05f
+        val ankleImg = if (poseOk) {
+            1f - guide.ankleY
+        } else {
+            val row = when {
+                shoeTop >= 0 -> shoeTop
+                pantsBottom >= 0 -> pantsBottom
+                legBottom >= 0 -> legBottom
+                else -> maxY
+            }
+            row.toFloat() / n
+        }
+        val cx = if (poseOk) guide.bodyCenter.x else ((minX + maxX) / 2f) / n
+        val halfW = if (poseOk) guide.bodyHalfW
+        else (((maxX - minX) / 2f) / n).coerceIn(0.05f, 0.40f)
+
+        // 腿段上界：长裤从腰拉、裙子从裙摆拉、只有露腿就从露腿最上沿拉
+        val pantsLike = pantsBottom >= 0 && skirtBottom < 0 &&
+                (ankleImg * n - pantsBottom) < n * 0.06f
+        val hemImg = when {
+            pantsLike -> (if (clothTop >= 0) clothTop.toFloat() else minY.toFloat()) / n
+            skirtBottom >= 0 -> skirtBottom.toFloat() / n
+            legTop >= 0 -> legTop.toFloat() / n
+            clothBottom >= 0 -> clothBottom.toFloat() / n
+            else -> (minY + (maxY - minY) * 0.5f) / n
+        }
+        if (ankleImg - hemImg < 0.04f) return null
+
+        // ---- 3. 蒙版 ----
+        val raw = ByteArray(n * n)
+        for (i in raw.indices) if (cls[i].toInt() != C_BG) raw[i] = 255.toByte()
+        val mask = featherMask(raw, n)
+
+        val yHip = (hemImg * n).toInt().coerceIn(0, n - 1)
+        val yAnkle = (ankleImg * n).toInt().coerceIn(0, n - 1)
+        val waistGl = 1f - (hemImg - 0.04f).coerceAtLeast(0f)
+
+        if (pantsLike) {
             return Result(
                 hemY = 1f - ankleImg, hemHalfW = halfW, edgeLift = 0f, isPants = true,
-                debug = "pants %.2f".format(pantsRatio), mask = mask, maskSize = n
+                debug = "pants", mask = mask, maskSize = n,
+                hipY = 1f - hemImg, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
+                centerX = cx, waistY = waistGl, halfW = halfW, hasBody = true
             )
         }
 
-        // 裙子：逐列找“裙装类”的最低一行
+        // ---- 4. 裙摆：逐列找裙装类的最低一行 ----
+        val x0 = ((cx - halfW * 0.55f) * n).toInt().coerceIn(0, n - 1)
+        val x1 = ((cx + halfW * 0.55f) * n).toInt().coerceIn(0, n - 1)
+        if (x1 <= x0) return null
         val cols = x1 - x0 + 1
-        val hem = IntArray(cols) { -1 }
+        val hemCols = IntArray(cols) { -1 }
         for (i in 0 until cols) {
             val x = x0 + i
             var low = -1
@@ -191,22 +243,19 @@ class HumanParsingAnalyzer(context: Context) {
                 val c = cls[y * n + x].toInt()
                 if (c == C_SKIRT || c == C_DRESS || c == C_JUMPSUIT) low = y
             }
-            hem[i] = low
+            hemCols[i] = low
         }
-        val centerHem = median(hem, (cols * 0.35f).toInt().coerceIn(0, cols - 1),
+        val centerHem = median(hemCols, (cols * 0.35f).toInt().coerceIn(0, cols - 1),
             (cols * 0.65f).toInt().coerceIn(0, cols - 1))
-        if (centerHem < 0) {
-            // 没解析到裙装：交给调用方回退到 6 类方案
-            return null
-        }
-        val edgeHem = medianEdges(hem, cols)
-        var lift = ((centerHem - if (edgeHem >= 0) edgeHem else centerHem).toFloat()) / n
+        val edgeHem = medianEdges(hemCols, cols)
+        val useHem = if (centerHem >= 0) centerHem else yHip
+        var lift = ((useHem - if (edgeHem >= 0) edgeHem else useHem).toFloat()) / n
         lift = lift.coerceIn(0f, 0.10f)
 
         // 裙摆宽度
         var left = n
         var right = -1
-        for (y in (centerHem - 6).coerceAtLeast(yHip)..centerHem) {
+        for (y in (useHem - 6).coerceAtLeast(0)..(useHem + 2).coerceAtMost(n - 1)) {
             for (x in 0 until n) {
                 val c = cls[y * n + x].toInt()
                 if (c == C_SKIRT || c == C_DRESS || c == C_JUMPSUIT) {
@@ -219,13 +268,12 @@ class HumanParsingAnalyzer(context: Context) {
         if (hemHalf < halfW * 0.6f) hemHalf = halfW
         hemHalf = hemHalf.coerceIn(0.05f, 0.45f)
 
-        val hemImg = (centerHem + 1).toFloat() / n
+        val hemGl = 1f - (useHem + 1).toFloat() / n
         return Result(
-            hemY = 1f - hemImg,
-            hemHalfW = hemHalf,
-            edgeLift = lift,
-            isPants = false,
-            debug = "skirt %.2f".format(skirtRatio), mask = mask, maskSize = n
+            hemY = hemGl, hemHalfW = hemHalf, edgeLift = lift, isPants = false,
+            debug = "hem %.2f".format(hemImg), mask = mask, maskSize = n,
+            hipY = 1f - hemImg, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
+            centerX = cx, waistY = waistGl, halfW = halfW, hasBody = true
         )
     }
 
@@ -328,9 +376,15 @@ class HumanParsingAnalyzer(context: Context) {
 
         // LIP 20 类索引
         private const val C_BG = 0
+        private const val C_UPPER = 5
         private const val C_DRESS = 6
+        private const val C_COAT = 7
         private const val C_PANTS = 9
         private const val C_JUMPSUIT = 10
         private const val C_SKIRT = 12
+        private const val C_LEG_L = 16
+        private const val C_LEG_R = 17
+        private const val C_SHOE_L = 18
+        private const val C_SHOE_R = 19
     }
 }

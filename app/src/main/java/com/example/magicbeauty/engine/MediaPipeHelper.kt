@@ -1,6 +1,7 @@
 package com.example.magicbeauty.engine
 
 import android.content.Context
+import android.graphics.PointF
 import android.graphics.Bitmap
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
@@ -134,6 +135,9 @@ class MediaPipeHelper(context: Context) {
             try {
                 val hp = humanParsing.analyze(bitmap, guide)
                 if (hp != null) {
+                    // 关键点（pose）没检出时，用解析结果自己推出来的位置顶上，
+                    // 否则瘦腰/拉腿会被整体清零 —— 这正是“拉滑块没反应”的主要原因。
+                    val usePose = guide.hasPose && (guide.ankleY - guide.hipY) > 0.05f
                     guide = guide.copy(
                         clothesHemY = hp.hemY,
                         clothesHalfW = hp.hemHalfW,
@@ -141,7 +145,13 @@ class MediaPipeHelper(context: Context) {
                         clothesEdgeLift = hp.edgeLift,
                         hasClothes = true,
                         personMask = hp.mask,
-                        maskSize = hp.maskSize
+                        maskSize = hp.maskSize,
+                        hipY = if (usePose) guide.hipY else hp.hipY,
+                        legTopY = if (usePose) guide.legTopY else hp.legTopY,
+                        ankleY = if (usePose) guide.ankleY else hp.ankleY,
+                        bodyCenter = if (usePose) guide.bodyCenter else PointF(hp.centerX, hp.waistY),
+                        bodyHalfW = if (usePose) guide.bodyHalfW else hp.halfW,
+                        hasPose = usePose || hp.hasBody
                     )
                     return guide
                 }

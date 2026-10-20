@@ -30,6 +30,7 @@ class LocalEditEngine {
     private var texMask = 0
     private var maskRef: ByteArray? = null
     private var maskN = 0
+    private var maskOk = false
     private var texA = 0   // warp 输出
     private var texB = 0   // adjust 输出
     private var fboA = 0
@@ -177,12 +178,13 @@ class LocalEditEngine {
             texMask = uploadMask(pm!!, guide.maskSize, texMask)
             maskRef = pm
             maskN = guide.maskSize
+            maskOk = texMask != 0
             bindTex(warpProg, "uTex", texSrc, 0)   // 恢复单元 0
         }
-        f(warpProg, "uHasMask", if (hasMask) 1f else 0f)
+        f(warpProg, "uHasMask", if (hasMask && maskOk) 1f else 0f)
         val mtex = if (maskN > 0) 1.6f / maskN else 1.6f / 473f
         f(warpProg, "uMaskTexel", mtex, mtex)
-        bindTex(warpProg, "uMask", if (hasMask) texMask else texSrc, 1)
+        bindTex(warpProg, "uMask", if (hasMask && maskOk) texMask else texSrc, 1)
         val fc = guide.faceCenter; val el = guide.eyeL; val er = guide.eyeR; val bc = guide.bodyCenter
         f(warpProg, "uAspect", width.toFloat() / height.toFloat().coerceAtLeast(1f))
         f(warpProg, "uFaceCenter", fc.x, fc.y)
@@ -242,7 +244,7 @@ class LocalEditEngine {
         EGL14.eglTerminate(eglDisplay)
         initialized = false
         texSrc = 0; texA = 0; texB = 0; texMask = 0
-        maskRef = null; maskN = 0
+        maskRef = null; maskN = 0; maskOk = false
         fboA = 0; fboB = 0
         targetsW = 0; targetsH = 0
         try { flipBitmap?.recycle() } catch (_: Exception) {}
@@ -309,22 +311,31 @@ class LocalEditEngine {
 
     /** 上传人体蒙版（单通道）。Bitmap 首行是顶部，GL 纹理 v=0 在底部，所以要按行翻转。 */
     private fun uploadMask(data: ByteArray, n: Int, reuse: Int): Int {
+        // 蒙版几乎全空时直接不用它（否则权重全是 0，所有形变都会失效）
+        var nonZero = 0
+        for (v in data) if (v.toInt() != 0) nonZero++
+        if (nonZero * 200 < n * n) return 0
+
         val tex = IntArray(1)
         if (reuse == 0) GLES20.glGenTextures(1, tex, 0) else tex[0] = reuse
         // 关键：必须切到纹理单元 1 再绑定。否则会把单元 0 上绑着的主图替换掉，
         // uTex 采到的是蒙版本身 → 整张图变黑（之前那一版的黑屏就是这个原因）。
         GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
-        val flipped = ByteArray(n * n)
+        // 用 RGBA 而不是 LUMINANCE：部分机型对非 2 次幂的 LUMINANCE 纹理采样会返回 0，
+        // 表现同样是“拉滑块完全没反应”。
+        val buf = ByteBuffer.allocateDirect(n * n * 4).order(ByteOrder.nativeOrder())
         for (y in 0 until n) {
-            System.arraycopy(data, y * n, flipped, (n - 1 - y) * n, n)
+            val srcRow = (n - 1 - y) * n
+            for (x in 0 until n) {
+                val v = data[srcRow + x]
+                buf.put(v); buf.put(v); buf.put(v); buf.put(255.toByte())
+            }
         }
-        val buf = ByteBuffer.allocateDirect(n * n).order(ByteOrder.nativeOrder())
-        buf.put(flipped)
         buf.position(0)
         GLES20.glTexImage2D(
-            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_LUMINANCE, n, n, 0,
-            GLES20.GL_LUMINANCE, GLES20.GL_UNSIGNED_BYTE, buf
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, n, n, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
         )
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
