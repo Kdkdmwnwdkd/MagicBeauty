@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.magicbeauty"
         minSdk = 24
         targetSdk = 34
-        versionCode = 12
-        versionName = "1.8.0"
+        versionCode = 13
+        versionName = "1.8.1"
 
         // 仅保留常用 ABI，缩小包体
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }

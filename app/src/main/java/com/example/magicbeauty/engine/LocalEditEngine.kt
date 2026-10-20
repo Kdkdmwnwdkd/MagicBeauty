@@ -182,6 +182,9 @@ class LocalEditEngine {
         f(warpProg, "uWaistSlim", eff.waistSlim)
         f(warpProg, "uHipY", if (legOk) legTop else guide.hipY)
         f(warpProg, "uLegHalfW", legHalfW)
+        // 只有走“裙摆模式”时才需要两侧抬高；长裤是平直裤脚
+        f(warpProg, "uHemLift", if (legOk && guide.hasClothes && !guide.clothesIsPants)
+            guide.clothesEdgeLift else 0f)
         f(warpProg, "uAnkleY", guide.ankleY)
         f(warpProg, "uLegStretch", eff.legStretch)
         drawQuad()

@@ -50,6 +50,7 @@ object Shaders {
         uniform float uWaistSlim;    // 0..1 瘦腰
         uniform float uHipY;         // 腿段上界（裙子=裙摆下沿 / 长裤=胯 / 兜底=膝盖）
         uniform float uLegHalfW;     // 拉腿的横向作用半径（裙子用裙摆半宽）
+        uniform float uHemLift;      // 裙摆两侧比中间高多少（大摆裙用）
         uniform float uAnkleY;       // 脚踝（腿段下界）
         uniform float uLegStretch;   // 0..0.18 拉腿
 
@@ -73,10 +74,14 @@ object Shaders {
             // 拉长的部分由胯以上整体上移吸收。所以不会有“鞋不动、脚被拉长”。
             // 横向再做一层「只在人体附近生效」的权重，否则门框、墙角这类竖线会被一起拉弯。
             if (uLegStretch > 0.001) {
-                float L = max(uHipY - uAnkleY, 0.02);
+                // 该列的腿段上界：中间用裙摆中线，靠两侧时按 uHemLift 抬高，
+                // 这样 A 字裙/大摆裙两侧更高也不会被当成“腿”多拉一截。
+                float dxn = abs(uv.x - uBodyCenter.x) / max(uLegHalfW, 0.02);
+                float top = uHipY + uHemLift * smoothstep(0.25, 1.10, dxn);
+                float L = max(top - uAnkleY, 0.02);
                 float delta = min(uLegStretch * L, 0.08);   // 上移量最多占画面高 8%，避免裁掉头顶
                 float s = 1.0 + delta / L;
-                float hipOut = uHipY + delta;
+                float hipOut = top + delta;
                 float y = uv.y;
                 if (y >= hipOut) {
                     y -= delta;

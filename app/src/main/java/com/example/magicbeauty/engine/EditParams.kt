@@ -48,6 +48,8 @@ data class WarpGuide(
     val hasClothes: Boolean = false,
     /** 长裤（下沿贴脚踝）：可以拉整条腿，衣服不会变形 */
     val clothesIsPants: Boolean = false,
+    /** 裙摆两侧相对中间的抬高量（A 字裙/大摆裙两侧比中间高） */
+    val clothesEdgeLift: Float = 0f,
     /** 大眼强度的自适应系数：眼睛小就多给一点，眼睛大就少给一点 */
     val eyeGain: Float = 1f,
     // 是否真的检测到人脸/人体。没检测到就不能拿默认坐标硬套，

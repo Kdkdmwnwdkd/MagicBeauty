@@ -134,6 +134,7 @@ class MediaPipeHelper(context: Context) {
                         clothesHemY = c.hemY,
                         clothesHalfW = c.hemHalfW,
                         clothesIsPants = c.isPants,
+                        clothesEdgeLift = c.edgeLift,
                         hasClothes = true
                     )
                 }

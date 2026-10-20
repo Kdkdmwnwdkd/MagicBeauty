@@ -47,7 +47,9 @@ class ClothingAnalyzer(context: Context) {
         /** 下沿处的半宽（按图片宽度归一化） */
         val hemHalfW: Float,
         /** 是否长裤（下沿几乎贴到脚踝） */
-        val isPants: Boolean
+        val isPants: Boolean,
+        /** 裙摆两侧相对中间的抬高量（归一化，0 表示平下摆） */
+        val edgeLift: Float = 0f
     )
 
     fun analyze(bitmap: Bitmap, guide: WarpGuide): Info? {
@@ -83,23 +85,51 @@ class ClothingAnalyzer(context: Context) {
             val yAnkle = (ankleImg * mh).toInt().coerceIn(0, mh - 1)
             if (x1 <= x0 || yAnkle <= yHip) return null
 
-            // 自下而上：第一行衣服像素占比 ≥ 30% 的，就是衣服下沿
-            var hemRow = -1
-            for (y in yAnkle downTo yHip) {
-                var hit = 0
-                var n = 0
-                val base = y * mw
-                for (x in x0..x1) {
-                    val idx = bytes[(base + x) * ch].toInt() and 0xff
-                    n++
-                    if (idx == CLOTHES_CLASS) hit++
+            // 逐列自下而上找衣服下沿。
+            // 单取一个全宽的下沿会误伤 A 字裙/大摆裙：裙摆两侧比中间高，
+            // 两侧就会被当成“腿”多拉一截。这里按列统计后再分区。
+            // 逐列「自上而下」找第一段连续衣服的结束位置，而不是“最下面一行衣服”。
+            // 原因：裙子 + 丝袜时，丝袜常被判成衣服类，若直接取最下面一行，
+            // 下沿会落到脚踝 → 被误判成长裤 → 整条腿拉，裙摆又被拉长。
+            // 改成“遇到超过 3% 画面高的空档就认为衣服到此为止”，裙子/短裤都能正确收边。
+            val cols = x1 - x0 + 1
+            val hemRows = IntArray(cols) { -1 }
+            var any = false
+            val gapMax = (mh * 0.03f).toInt().coerceAtLeast(2)
+            for (i in 0 until cols) {
+                val x = x0 + i
+                var started = false
+                var lastCloth = -1
+                var gap = 0
+                for (y in yHip..yAnkle) {
+                    val isCloth = (bytes[(y * mw + x) * ch].toInt() and 0xff) == CLOTHES_CLASS
+                    if (isCloth) {
+                        started = true
+                        lastCloth = y
+                        gap = 0
+                    } else if (started) {
+                        gap++
+                        if (gap > gapMax) break
+                    }
                 }
-                if (n > 0 && hit * 100 / n >= 30) {
-                    hemRow = y
-                    break
+                if (lastCloth >= 0) {
+                    hemRows[i] = lastCloth
+                    any = true
                 }
             }
-            if (hemRow < 0) return null
+            if (!any) return null
+
+            // 中间区（靠近身体中线）与两侧区分别取中位数，得到“中间下沿”和“两侧抬高量”
+            val midFrom = (cols * 0.35f).toInt().coerceIn(0, cols - 1)
+            val midTo = (cols * 0.65f).toInt().coerceIn(0, cols - 1)
+            val centerHem = medianOf(hemRows, midFrom, midTo)
+            val edgeHem = medianOfEdges(hemRows, cols)
+            if (centerHem < 0) return null
+            // 图像坐标 y 向下：两侧更高 => edgeHem 更小 => lift 为正
+            var lift = ((centerHem - if (edgeHem >= 0) edgeHem else centerHem).toFloat()) / mh
+            lift = lift.coerceIn(0f, 0.10f)
+
+            val hemRow = centerHem
 
             // 裙摆 / 裤脚宽度：在衣服下沿上方几行取左右最外沿
             var left = mw
@@ -125,12 +155,33 @@ class ClothingAnalyzer(context: Context) {
             val hemImg = (hemRow + 1).toFloat() / mh
             val isPants = (ankleImg - hemImg) < 0.06f
 
-            Info(hemY = 1f - hemImg, hemHalfW = hemHalf, isPants = isPants)
+            Info(hemY = 1f - hemImg, hemHalfW = hemHalf, isPants = isPants, edgeLift = lift)
         } catch (_: Throwable) {
             null
         } finally {
             try { mpImage.close() } catch (_: Exception) {}
         }
+    }
+
+    /** 取 [from..to] 里有效列的中位数 */
+    private fun medianOf(rows: IntArray, from: Int, to: Int): Int {
+        val v = ArrayList<Int>()
+        for (i in from..to) if (rows[i] >= 0) v.add(rows[i])
+        if (v.isEmpty()) return -1
+        v.sort()
+        return v[v.size / 2]
+    }
+
+    /** 取左右两侧各 30% 列的中位数（裙摆外沿） */
+    private fun medianOfEdges(rows: IntArray, cols: Int): Int {
+        val leftTo = (cols * 0.30f).toInt().coerceIn(0, cols - 1)
+        val rightFrom = (cols * 0.70f).toInt().coerceIn(0, cols - 1)
+        val v = ArrayList<Int>()
+        for (i in 0..leftTo) if (rows[i] >= 0) v.add(rows[i])
+        for (i in rightFrom until cols) if (rows[i] >= 0) v.add(rows[i])
+        if (v.isEmpty()) return -1
+        v.sort()
+        return v[v.size / 2]
     }
 
     fun close() {
