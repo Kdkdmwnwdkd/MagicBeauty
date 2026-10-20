@@ -81,7 +81,7 @@ class CropOverlayView @JvmOverloads constructor(
     }
 
     /** 设置比例后把当前裁剪框收敛到该比例（围绕中心） */
-    fun setRatio(r: Float) {
+    fun setRatioLock(r: Float) {
         ratio = r
         applyRatio()
         onCropChanged?.invoke()

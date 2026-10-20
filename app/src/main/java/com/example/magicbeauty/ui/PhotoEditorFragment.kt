@@ -665,7 +665,7 @@ class PhotoEditorFragment : Fragment() {
                     (28 * resources.displayMetrics.density).toInt()
                 ).apply { marginStart = (6 * resources.displayMetrics.density).toInt() }
                 setOnClickListener {
-                    binding.cropOverlay.setRatio(r)
+                    binding.cropOverlay.setRatioLock(r)
                     ratios.forEachIndexed { i, _ ->
                         (row.getChildAt(i) as? TextView)?.isSelected = i == row.indexOfChild(this)
                     }
