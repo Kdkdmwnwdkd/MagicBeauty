@@ -96,18 +96,28 @@ object Shaders {
                 float dxn = abs(uv.x - uBodyCenter.x) / max(uLegHalfW, 0.02);
                 float top = uHipY + uHemLift * smoothstep(0.25, 1.10, dxn);
                 float L = max(top - uAnkleY, 0.02);
-                float delta = min(uLegStretch * L, 0.08);   // 上移量最多占画面高 8%，避免裁掉头顶
-                float s = 1.0 + delta / L;
-                // 单段最多拉长 18%：裙摆很低（只有一小截腿露出）时，
-                // 否则那一小段会被放大成“小腿过长”，看着像坏了
-                s = min(s, 1.18);
-                delta = (s - 1.0) * L;
+
+                // 关键：按「目标增高量」算，不是按腿段长度的百分比。
+                // 旧写法 delta = uLegStretch * L，腿段越短位移越小 —— 洛丽塔长裙只露
+                // 一截小腿时，位移不到 1% 画面高，看起来就是“拉到 100 也没反应”。
+                // 现在先定目标增高（最多 11% 画面高），再换算成这一段的拉伸倍率，
+                // 腿段短就多拉一点、腿段长就少拉一点，视觉增高量一致。
+                float want  = uLegStretch * 0.11;
+                float s     = clamp(1.0 + want / L, 1.0, 1.42);   // 单段最多拉长 42%
+                float delta = (s - 1.0) * L;
+
                 float hipOut = top + delta;
                 float y = uv.y;
                 if (y >= hipOut) {
                     y -= delta;
                 } else if (y > uAnkleY) {
-                    y = uAnkleY + (y - uAnkleY) / s;
+                    // 脚踝上方留一段过渡带：倍率从 1 平滑过渡到 s，
+                    // 否则脚踝那一行导数突变，会看到一道折痕。
+                    float soft = max(L * 0.14, 0.012);
+                    float d = y - uAnkleY;
+                    float k = clamp(d / soft, 0.0, 1.0);
+                    k = k * k * (3.0 - 2.0 * k);
+                    y = uAnkleY + d * mix(1.0, 1.0 / s, k);
                 }
                 // 作用范围交给人体蒙版统一控制（最后一步 mix），这里不再叠加横向权重，
                 // 否则“蒙版 + 横向权重”双重衰减会让腿部边缘出现台阶、幅度也被削掉。
@@ -117,11 +127,16 @@ object Shaders {
             // ---------- ② 瘦腰：平滑权重，无硬边 ----------
             if (uWaistSlim > 0.001) {
                 float hw = max(uBodyHalfW * uAspect, 0.02);
-                float dx = (uv.x - uBodyCenter.x) * uAspect / hw;
-                // 垂直带窄一点，收得更集中在腰上，不会把胯一起缩
-                float dy = (uv.y - uWaistY) / (hw * 0.70);
-                float w = exp(-dx * dx * 0.45) * exp(-dy * dy);
-                uv.x = uBodyCenter.x + (uv.x - uBodyCenter.x) * (1.0 + uWaistSlim * 0.28 * w);
+                float dx = (uv.x - uBodyCenter.x) / max(uBodyHalfW, 0.02);
+                // 垂直方向按画面高度给固定带宽（±7%），不要跟着腰宽缩：
+                // 腰宽窄的时候带宽会一起变窄，收腰只作用在一条细缝上，看着像没效果。
+                float dy = (uv.y - uWaistY) / 0.07;
+                // 权重形状：腰内（|dx|<0.75）满强度，到 1.55 倍半腰宽处归零。
+                // 之前用 exp(-dx*dx*k)，最大值在中心、轮廓处只剩 13%，等于“腰中间不动、
+                // 边上才动”，既不明显，又因为作用到轮廓外把墙/门框卷进来 → 放光变色。
+                float ax = abs(dx);
+                float w = (1.0 - smoothstep(0.75, 1.55, ax)) * exp(-dy * dy * 1.2);
+                uv.x = uBodyCenter.x + (uv.x - uBodyCenter.x) * (1.0 + uWaistSlim * 0.18 * w);
             }
 
             // ---------- ③ 瘦脸：只收下颌轮廓，五官不动 ----------
@@ -148,7 +163,11 @@ object Shaders {
             // 只在人体范围内生效：背景像素直接沿用原始坐标，一点不动
             // （半条腿露出来、被裙摆遮住一部分的情况，也会按实际像素分别处理）
             uv = clamp(uv, 0.0, 1.0);
-            uv = mix(vUV, uv, personWeight(vUV));
+            // 两个位置都要在人体内才给满权重：
+            // 只看输出位置的话，收缩/拉伸后的采样点可能已经落到背景上（比如白墙），
+            // 会把它抓进人体边缘，表现就是“腰侧一圈发亮、颜色发虚”。
+            float pw = min(personWeight(vUV), personWeight(uv));
+            uv = mix(vUV, uv, pw);
 
             gl_FragColor = texture2D(uTex, uv);
         }

@@ -130,27 +130,35 @@ class MediaPipeHelper(context: Context) {
             }
         } catch (_: Exception) { /* 保留默认 */ }
 
-        // 衣服下沿：先用 LIP 20 类人体解析（裙/裤/袜/鞋分得清），失败再回退 6 类分割
-        if (withClothing && guide.hasPose) {
+        // 衣服下沿：先用 LIP 20 类人体解析（裙/裤/袜/鞋分得清），失败再回退 6 类分割。
+        // 注意不要加 guide.hasPose 条件：解析器自己能推腿/腰位置，
+        // 加上就退回到“检不到关键点就什么都不做”的老问题。
+        if (withClothing) {
             try {
                 val hp = humanParsing.analyze(bitmap, guide)
                 if (hp != null) {
                     // 关键点（pose）没检出时，用解析结果自己推出来的位置顶上，
                     // 否则瘦腰/拉腿会被整体清零 —— 这正是“拉滑块没反应”的主要原因。
                     val usePose = guide.hasPose && (guide.ankleY - guide.hipY) > 0.05f
+                    val waistY = if (usePose) guide.waistY else hp.waistY
                     guide = guide.copy(
                         clothesHemY = hp.hemY,
                         clothesHalfW = hp.hemHalfW,
                         clothesIsPants = hp.isPants,
                         clothesEdgeLift = hp.edgeLift,
                         hasClothes = true,
-                        personMask = hp.mask,
-                        maskSize = hp.maskSize,
+                        // 分割不可靠时宁可不给蒙版：白丝袜+浅墙这类会被判成背景，
+                        // 蒙版在腿上是 0，位移全被抹掉，看起来就是“拉腿没反应”。
+                        personMask = if (hp.maskReliable) hp.mask else null,
+                        maskSize = if (hp.maskReliable) hp.maskSize else 0,
                         hipY = if (usePose) guide.hipY else hp.hipY,
                         legTopY = if (usePose) guide.legTopY else hp.legTopY,
                         ankleY = if (usePose) guide.ankleY else hp.ankleY,
-                        bodyCenter = if (usePose) guide.bodyCenter else PointF(hp.centerX, hp.waistY),
-                        bodyHalfW = if (usePose) guide.bodyHalfW else hp.halfW,
+                        // 中线与腰宽一律用解析值：它是按实际像素量的，
+                        // 比骨骼肩宽的估计更贴腰，瘦腰范围才不会把墙/门框卷进来。
+                        bodyCenter = PointF(hp.centerX, waistY),
+                        bodyHalfW = hp.waistHalfW,
+                        waistY = waistY,
                         hasPose = usePose || hp.hasBody
                     )
                     return guide

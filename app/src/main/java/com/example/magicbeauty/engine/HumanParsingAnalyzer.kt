@@ -51,6 +51,10 @@ class HumanParsingAnalyzer(context: Context) {
         val centerX: Float,
         val waistY: Float,
         val halfW: Float,
+        /** 腰部实际半宽（在腰线那一行量的人体像素宽），比整个人体框准，瘦腰范围用它 */
+        val waistHalfW: Float,
+        /** 腿段里的人体覆盖率是否够（白丝袜+浅色墙时分割会把腿判成背景） */
+        val maskReliable: Boolean,
         val hasBody: Boolean
     )
 
@@ -180,8 +184,19 @@ class HumanParsingAnalyzer(context: Context) {
             }
         }
         if (maxX < 0 || maxY < 0) return null
-        val areaRatio = ((maxX - minX + 1).toFloat() * (maxY - minY + 1)) / (n * n).toFloat()
-        if (areaRatio < 0.012f) return null          // 人太小，避免乱动
+        // 用「人体像素实际占比」判断，不用外接框面积：
+        // 手机截图里有大量 UI 文字/图标，会把框撑得很大，但人其实只占一点点。
+        var personPx = 0
+        for (i in 0 until n * n) if (cls[i].toInt() != C_BG) personPx++
+        val personRatio = personPx.toFloat() / (n * n).toFloat()
+        if (personRatio < 0.03f) return null          // 人像素太少，结果不可信
+
+        // 下半身一个部位都没识别到（腿/裤/裙/袜/鞋全无）→ 位置是瞎猜的，别用。
+        // 之前就是这种情况：模型只认出一条手臂，却据此推出了“脚踝在画面最底边”，
+        // 结果 legOk 被判 false，拉腿彻底不生效。
+        val hasLowerBody = skirtBottom >= 0 || pantsBottom >= 0 ||
+                legTop >= 0 || shoeTop >= 0
+        if (!hasLowerBody) return null
 
         // ---- 2. 位置：关键点优先，没有就用解析结果自己推 ----
         val poseOk = guide.hasPose && (guide.ankleY - guide.hipY) > 0.05f
@@ -221,12 +236,46 @@ class HumanParsingAnalyzer(context: Context) {
         val yAnkle = (ankleImg * n).toInt().coerceIn(0, n - 1)
         val waistGl = 1f - (hemImg - 0.04f).coerceAtLeast(0f)
 
+        // 腰宽：在腰线那一行量人体的实际宽度（不用整个人体框，框里含手臂会撑太宽，
+        // 瘦腰范围一宽就会把旁边的墙/门框一起拉进来）。
+        val waistRow = (hemImg * n - n * 0.05f).toInt().coerceIn(0, n - 1)
+        var wl = n
+        var wr = -1
+        for (y in (waistRow - 3).coerceAtLeast(0)..(waistRow + 3).coerceAtMost(n - 1)) {
+            for (x in 0 until n) {
+                if (cls[y * n + x].toInt() != C_BG) {
+                    if (x < wl) wl = x
+                    if (x > wr) wr = x
+                }
+            }
+        }
+        val waistHalf = if (wr > wl) ((wr - wl) / 2f / n).coerceIn(0.04f, 0.32f) else halfW
+
+        // 腿段里的人体覆盖率：白丝袜+浅墙、白裙+白背景这类，分割会把腿判成背景，
+        // 蒙版在腿上就是 0 —— 位移被整段抹掉，表现就是“拉腿完全没反应”。
+        // 覆盖率太低时干脆不用蒙版（宁可背景动一点，也不能拉了没反应）。
+        var hit = 0
+        var tot = 0
+        if (yAnkle > yHip) {
+            val lx0 = ((cx - 0.22f) * n).toInt().coerceIn(0, n - 1)
+            val lx1 = ((cx + 0.22f) * n).toInt().coerceIn(0, n - 1)
+            for (y in yHip..yAnkle) {
+                for (x in lx0..lx1) {
+                    tot++
+                    if (cls[y * n + x].toInt() != C_BG) hit++
+                }
+            }
+        }
+        val legCover = if (tot > 0) hit.toFloat() / tot else 0f
+        val maskReliable = legCover >= 0.22f
+
         if (pantsLike) {
             return Result(
                 hemY = 1f - ankleImg, hemHalfW = halfW, edgeLift = 0f, isPants = true,
                 debug = "pants", mask = mask, maskSize = n,
                 hipY = 1f - hemImg, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
-                centerX = cx, waistY = waistGl, halfW = halfW, hasBody = true
+                centerX = cx, waistY = waistGl, halfW = halfW,
+                waistHalfW = waistHalf, maskReliable = maskReliable, hasBody = true
             )
         }
 
@@ -273,7 +322,8 @@ class HumanParsingAnalyzer(context: Context) {
             hemY = hemGl, hemHalfW = hemHalf, edgeLift = lift, isPants = false,
             debug = "hem %.2f".format(hemImg), mask = mask, maskSize = n,
             hipY = 1f - hemImg, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
-            centerX = cx, waistY = waistGl, halfW = halfW, hasBody = true
+            centerX = cx, waistY = waistGl, halfW = halfW,
+            waistHalfW = waistHalf, maskReliable = maskReliable, hasBody = true
         )
     }
 

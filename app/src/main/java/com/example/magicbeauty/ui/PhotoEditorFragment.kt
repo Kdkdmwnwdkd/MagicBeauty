@@ -245,7 +245,7 @@ class PhotoEditorFragment : Fragment() {
         } else {
             // 只缺人脸时，不要连带说“瘦腰/拉腿也失效”，之前那句提示会误导
             binding.tvHint.text = "未识别到${missing.joinToString("、")}：" +
-                    "${off.joinToString("、")}不会生效（正脸、全身照效果最好）"
+                    "${off.joinToString("、")}暂不生效（其余功能正常，正脸/全身照效果最好）"
             binding.tvHint.visibility = View.VISIBLE
         }
     }

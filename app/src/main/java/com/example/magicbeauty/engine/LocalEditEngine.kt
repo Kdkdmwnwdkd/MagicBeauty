@@ -141,7 +141,11 @@ class LocalEditEngine {
         //   · 长裤（衣服贴到脚踝）→ 从胯开始拉整条腿，裤子本来贴着腿，跟着变长是自然的；
         //   · 裙子/短裤（下摆在大腿或小腿）→ 从下摆开始拉，裙摆只整体上移、长度不变；
         //   · 没有衣服信息 → 退回膝盖。
-        val hemOk = guide.hasClothes && (guide.clothesHemY - guide.ankleY) > 0.04f
+        // 裙摆/裤脚不能比膝盖低太多：袜子、长靴、厚底鞋常被误判成“裙子”，
+        // 下沿一路落到脚踝，按它当界线就只剩几像素可拉，等于没效果。
+        val hemOk = guide.hasClothes &&
+                (guide.clothesHemY - guide.ankleY) > 0.04f &&
+                guide.clothesHemY > guide.legTopY - 0.06f
         val legTop = when {
             guide.hasClothes && guide.clothesIsPants -> guide.hipY
             hemOk -> guide.clothesHemY
@@ -151,8 +155,14 @@ class LocalEditEngine {
         val legHalfW = if (guide.hasClothes && !guide.clothesIsPants && guide.clothesHalfW > 0.05f)
             guide.clothesHalfW else guide.bodyHalfW
 
-        val legOk = guide.hasPose && (legTop - guide.ankleY) > 0.05f && guide.ankleY > 0.02f
-        val waistOk = guide.hasPose && guide.bodyHalfW > 0.03f
+        // 门槛放到 0.035：洛丽塔这类长裙只露一小截小腿，腿段本来只有几个百分点画面高，
+        // 卡 0.05 会把整条腿判成“不存在”，拉滑块就完全没反应。
+        val legOk = guide.hasPose && (legTop - guide.ankleY) > 0.03f && guide.ankleY > 0.005f
+        // 腰必须在腿段上沿附近：半身照（看不到腿）里“腰”会被推到画面边缘，
+        // 收出来就是腰侧一片放光，不如干脆不生效。
+        val waistOk = guide.hasPose && guide.bodyHalfW > 0.04f &&
+                guide.waistY > 0.18f && guide.waistY < 0.95f &&
+                (guide.waistY - legTop) > -0.06f && (guide.waistY - legTop) < 0.32f
         val eff = params.copy(
             thinFace = if (guide.hasFace) params.thinFace else 0f,
             eyeEnlarge = if (guide.hasFace)
