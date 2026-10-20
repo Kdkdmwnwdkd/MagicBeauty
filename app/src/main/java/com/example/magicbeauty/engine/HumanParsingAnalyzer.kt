@@ -53,6 +53,9 @@ class HumanParsingAnalyzer(context: Context) {
         val halfW: Float,
         /** 腰部实际半宽（在腰线那一行量的人体像素宽），比整个人体框准，瘦腰范围用它 */
         val waistHalfW: Float,
+        /** 人体外接框顶/底（GL 坐标）——无蒙版兜底时限制位移垂直范围，头顶上方背景不动 */
+        val bodyTopY: Float = 0f,
+        val bodyBottomY: Float = 0f,
         /** 腿段里的人体覆盖率是否够（白丝袜+浅色墙时分割会把腿判成背景） */
         val maskReliable: Boolean,
         val hasBody: Boolean
@@ -195,7 +198,10 @@ class HumanParsingAnalyzer(context: Context) {
         var personPx = 0
         for (i in 0 until n * n) if (cls[i].toInt() != C_BG) personPx++
         val personRatio = personPx.toFloat() / (n * n).toFloat()
-        if (personRatio < 0.03f) return null          // 人像素太少，结果不可信
+        // 竖构图全身照人物只占 1.5%~2%（窄高），0.03 会把正常照片整体枪掉；
+        // 实测两张正常全身照（楼梯间/自拍）分别是 1.83% 和 1.63%。
+        // 真正不可信的（截图里人很小）由后面的 hasLowerBody / 腿段覆盖率守卫拦。
+        if (personRatio < 0.008f) return null
 
         // 下半身一个部位都没识别到（腿/裤/裙/袜/鞋全无）→ 位置是瞎猜的，别用。
         // 之前就是这种情况：模型只认出一条手臂，却据此推出了“脚踝在画面最底边”，
@@ -206,12 +212,25 @@ class HumanParsingAnalyzer(context: Context) {
 
         // ---- 2. 位置：关键点优先，没有就用解析结果自己推 ----
         val poseOk = guide.hasPose && (guide.ankleY - guide.hipY) > 0.05f
+        // 分割截断检测：裙子检出了，但分割人体框在裙摆下一点就断（<10% 画面高），
+        // 且整体没超过画面上 4/5 —— 说明裙摆以下的腿/袜/鞋/地板全被判成了背景
+        // （白袜+浅色地板、洛丽塔大裙摆都会这样，实测两条裙子照全中）。
+        // 这种模式下分割出的"脚踝"和蒙版都不可信，按全身照统计值估计脚底。
+        val segCut = !poseOk && skirtBottom >= 0 && maxY < n * 0.80f &&
+                (maxY - skirtBottom) < n * 0.10f
+        val ankleEst = 0.85f   // 站姿全身照脚底经验位置（85% 画面高）
         val ankleImg = if (poseOk) {
             1f - guide.ankleY
+        } else if (segCut) {
+            ankleEst
         } else {
             val row = when {
                 shoeTop >= 0 -> shoeTop.toFloat() / n
-                pantsBottom >= 0 -> pantsBottom.toFloat() / n
+                // 有裙子时 pantsBottom 多半是误判：裙摆纹理（格裙/洛丽塔蕾丝）
+                // 会被认成裤子，pantsBottom 落在裙摆下方。实测两条裙子照的
+                // pantsBottom 都错位到 0.61（真实脚踝在 0.85+），脚踝被推错。
+                // 只有真裤子（没有裙装检出）才用裤脚下沿当脚踝。
+                pantsBottom >= 0 && skirtBottom < 0 -> pantsBottom.toFloat() / n
                 // 没识别到鞋时，腿的最下沿其实是“脚底”。直接把脚底当脚踝，
                 // 整只脚和袜子都会被拉长，还会把脚下的地板一起拖上来
                 // （用户看到的“拉腿后面背景跟着动”就是这个）。
@@ -239,6 +258,26 @@ class HumanParsingAnalyzer(context: Context) {
         // ---- 3. 蒙版 ----
         val raw = ByteArray(n * n)
         for (i in raw.indices) if (cls[i].toInt() != C_BG) raw[i] = 255.toByte()
+        // 截断模式修补蒙版：分割在裙摆下把腿判成了背景，蒙版断在裙摆处，
+        // 用它拉腿就是"只拉一截、下面不动"。从裙摆行向估计脚踝行做一个
+        // 梯形人体区补进蒙版（裙摆半宽 → 踝宽线性收窄）——
+        // 商用 SDK 在分割漏检时同样用先验修补，比"无蒙版横向窗口兜底"
+        // （只有中线动、两侧背景跟着晃）均匀得多，背景仍在梯形外绝对不动。
+        if (segCut) {
+            val y0 = (hemImg * n).toInt().coerceIn(0, n - 1)
+            val y1 = (ankleEst * n).toInt().coerceIn(0, n - 1)
+            if (y1 > y0) {
+                val halfTop = halfW.coerceIn(0.04f, 0.40f)
+                val halfBot = (halfW * 0.5f).coerceIn(0.03f, 0.20f)
+                for (y in y0..y1) {
+                    val t = (y - y0).toFloat() / (y1 - y0).toFloat()
+                    val half = halfTop + (halfBot - halfTop) * t
+                    val xa = ((cx - half) * n).toInt().coerceIn(0, n - 1)
+                    val xb = ((cx + half) * n).toInt().coerceIn(0, n - 1)
+                    for (x in xa..xb) raw[y * n + x] = 255.toByte()
+                }
+            }
+        }
         val mask = featherMask(raw, n)
 
         val yHip = (hemImg * n).toInt().coerceIn(0, n - 1)
@@ -246,9 +285,11 @@ class HumanParsingAnalyzer(context: Context) {
         // 腰线：上衣下沿与裙子（连衣裙）上沿的交界，才是真正的腰。
         // 旧写法取「裙摆 - 4%」，JK 这种裙摆很低的，腰线会落到小腿上，
         // 一拉瘦腰就是在收小腿，看着像“没反应/识别到裙子上”。
+        // 两者都有时取更靠上的那个（取中点会把 upperBottom 被手臂撑低的
+        // 情况带偏，实测格子裙自拍上衣+手臂下沿被撑到 0.53，腰线偏低 3%）。
         val waistImg = when {
             upperBottom >= 0 && skirtTop >= 0 ->
-                (upperBottom + skirtTop) / 2f / n
+                minOf(upperBottom, skirtTop).toFloat() / n
             upperBottom >= 0 -> upperBottom.toFloat() / n
             skirtTop >= 0 -> skirtTop.toFloat() / n
             else -> (hemImg - 0.10f).coerceAtLeast(0.05f)
@@ -286,7 +327,12 @@ class HumanParsingAnalyzer(context: Context) {
             }
         }
         val legCover = if (tot > 0) hit.toFloat() / tot else 0f
-        val maskReliable = legCover >= 0.22f
+        // 腿段覆盖率低（白袜+浅色墙/地板，分割把腿判成背景）时：
+        // 1. 关键点可信就仍然用蒙版——位移场在人体外权重为 0，背景依然不动，
+        //    只是腿下部分不拉，比"没蒙版走横向窗口兜底把墙一起拉伸"好得多；
+        // 2. 截断模式（分割在裙摆下丢腿）已用梯形先验修补蒙版，主动判可靠。
+        // 实测两条裙子照 legCover 只有 0.11~0.13（裙摆以下全被判成背景）。
+        val maskReliable = legCover >= 0.22f || (poseOk && legCover >= 0.05f) || segCut
 
         if (pantsLike) {
             return Result(
@@ -294,7 +340,9 @@ class HumanParsingAnalyzer(context: Context) {
                 debug = "pants", mask = mask, maskSize = n,
                 hipY = 1f - hemImg, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
                 centerX = cx, waistY = waistGl, halfW = halfW,
-                waistHalfW = waistHalf, maskReliable = maskReliable, hasBody = true
+                waistHalfW = waistHalf, maskReliable = maskReliable, hasBody = true,
+                bodyTopY = 1f - minY.toFloat() / n,
+                bodyBottomY = if (segCut) 1f - ankleEst else 1f - maxY.toFloat() / n
             )
         }
 
@@ -342,7 +390,9 @@ class HumanParsingAnalyzer(context: Context) {
             debug = "hem %.2f".format(hemImg), mask = mask, maskSize = n,
             hipY = 1f - hemImg, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
             centerX = cx, waistY = waistGl, halfW = halfW,
-            waistHalfW = waistHalf, maskReliable = maskReliable, hasBody = true
+            waistHalfW = waistHalf, maskReliable = maskReliable, hasBody = true,
+                bodyTopY = 1f - minY.toFloat() / n,
+                bodyBottomY = if (segCut) 1f - ankleEst else 1f - maxY.toFloat() / n
         )
     }
 

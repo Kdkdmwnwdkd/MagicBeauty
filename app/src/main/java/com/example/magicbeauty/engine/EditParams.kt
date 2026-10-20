@@ -52,6 +52,10 @@ data class WarpGuide(
     val clothesEdgeLift: Float = 0f,
     /** 大眼强度的自适应系数：眼睛小就多给一点，眼睛大就少给一点 */
     val eyeGain: Float = 1f,
+    /** 人体外接框顶/底（GL 坐标，y 向上）——无蒙版兜底时限制位移的垂直范围：
+     *  头顶上方、脚底下方的背景位移恒 0（用户报的"人物上面背景跟着变高"的根治） */
+    val bodyTopY: Float = 0f,
+    val bodyBottomY: Float = 0f,
     /** 人体蒙版（非背景=255）：所有形变只在这个范围内生效，背景保持不动 */
     val personMask: ByteArray? = null,
     val maskSize: Int = 0,

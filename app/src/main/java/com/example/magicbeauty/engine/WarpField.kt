@@ -61,7 +61,13 @@ object WarpField {
 
         // 没有蒙版时（分割不可用），用横向窗口把作用范围收在身体附近，
         // 否则整幅画面都会跟着动 —— 这正是之前“背景跟着动”的原因之一。
-        val lateralHalf = (guide.clothesHalfW.takeIf { it > 0.05f } ?: halfW) * 1.5f
+        // 窗口不再外扩 1.5 倍（会把身后的墙圈进来），收到 0.9 倍；
+        // 并且加上垂直窗口：只在人体框 [bodyBottomY, bodyTopY] 内有权重，
+        // 头顶上方、脚底下方的背景位移恒 0。
+        val lateralHalf = (guide.clothesHalfW.takeIf { it > 0.05f } ?: halfW) * 0.9f
+        val vTop = guide.bodyTopY
+        val vBot = guide.bodyBottomY
+        val hasVWin = vTop > vBot + 0.05f
 
         var idx = 0
         for (j in 0 until H) {
@@ -69,14 +75,26 @@ object WarpField {
             for (i in 0 until W) {
                 val u = (i + 0.5f) / W
 
-                // 人体权重：有蒙版按蒙版，没有就用横向窗口
-                val pw = if (useMask) {
+                // 人体权重：有蒙版按蒙版，没有就用横向+垂直双窗口
+                var pw = if (useMask) {
                     val mx = (u * (mn - 1)).toInt().coerceIn(0, mn - 1)
                     val my = ((1f - v) * (mn - 1)).toInt().coerceIn(0, mn - 1)
                     (mask!![my * mn + mx].toInt() and 0xff) / 255f
                 } else {
                     val dxn = abs(u - cx) / lateralHalf.coerceAtLeast(0.05f)
-                    if (dxn >= 2.2f) 0f else exp(-Math.pow(dxn.toDouble(), 4.0)).toFloat()
+                    val wx = if (dxn >= 2.2f) 0f else exp(-Math.pow(dxn.toDouble(), 4.0)).toFloat()
+                    if (hasVWin && wx > 0f) {
+                        // 垂直方向：人体框外（头顶上方/脚底下方）快速归零，
+                        // 那两片区域是纯背景，位移必须是 0。
+                        val above = (v - vTop) / 0.04f
+                        val below = (vBot - v) / 0.04f
+                        val vy = when {
+                            above > 0f -> exp(-(above * above * 3.0).toDouble()).toFloat()
+                            below > 0f -> exp(-(below * below * 3.0).toDouble()).toFloat()
+                            else -> 1f
+                        }
+                        wx * vy
+                    } else wx
                 }
 
                 var du = 0f
@@ -109,8 +127,11 @@ object WarpField {
                         val ax = abs(u - cx) / halfW
                         // 腰内满强度、到 1.55 倍半腰宽处归零：只收腰，不把墙卷进来
                         val wx = 1f - smoothstep(0.75f, 1.55f, ax)
-                        val dy = (v - waistY) / 0.05f
-                        val wy = exp(-(dy * dy * 1.2f).toDouble()).toFloat()
+                        // 垂直带收窄：原来 ±0.05 且衰减慢（dy=1 处还剩 30%），
+                        // 竖构图下 ±8% 画面高都在收，胸到胯全在动，
+                        // 用户看到的就是"瘦的位置不是腰"。改 ±0.028 快速归零。
+                        val dy = (v - waistY) / 0.028f
+                        val wy = exp(-(dy * dy * 2.6f).toDouble()).toFloat()
                         du = (u - cx) * params.waistSlim * 0.18f * wx * wy
                     }
                 }

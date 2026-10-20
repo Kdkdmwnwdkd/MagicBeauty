@@ -102,31 +102,39 @@ class MediaPipeHelper(context: Context) {
                 val hip = mid(p[23], p[24])
                 val shoulder = mid(p[11], p[12])
                 val ankle = mid(p[27], p[28])
-                // 腰在胯之上：取肩胯连线上、靠胯 25% 的位置（原来直接用胯，位置偏低）
-                val waistYImg = hip.y - 0.25f * (hip.y - shoulder.y)
-                // 半身宽取「胯宽」和「肩宽一半」里较大的那个：
-                // 拉腿的横向权重靠它定范围，取窄了会把裙摆/阔腿裤的边缘留在原地，
-                // 看起来就是“身体上去了、裙子还拖在下面”。
-                val hipHalf = dist(p[23], p[24]) / 2f
-                val shoulderHalf = dist(p[11], p[12]) * 0.50f
-                val halfW = maxOf(hipHalf, shoulderHalf)
+                // 关键点数据合理性守卫：背面+复杂背景时 lite 模型会给出错乱的
+                // 全身点（实测楼梯间背面照：脚踝 y=0.569 比胯 y=0.496 还"低"，
+                // 即 GL 坐标里脚踝跑到胯上面，腿长变成负数）。
+                // 这种数据宁可不用——用解析结果自己推，也不能拿它当基准。
+                val poseSane = ankle.y > hip.y + 0.02f && hip.y > shoulder.y &&
+                        shoulder.y > 0.02f && ankle.y < 1.05f
+                if (poseSane) {
+                    // 腰在胯之上：取肩胯连线上、靠胯 25% 的位置（原来直接用胯，位置偏低）
+                    val waistYImg = hip.y - 0.25f * (hip.y - shoulder.y)
+                    // 半身宽取「胯宽」和「肩宽一半」里较大的那个：
+                    // 拉腿的横向权重靠它定范围，取窄了会把裙摆/阔腿裤的边缘留在原地，
+                    // 看起来就是“身体上去了、裙子还拖在下面”。
+                    val hipHalf = dist(p[23], p[24]) / 2f
+                    val shoulderHalf = dist(p[11], p[12]) * 0.50f
+                    val halfW = maxOf(hipHalf, shoulderHalf)
 
-                // 腿段上界优先取膝盖：裙子、长上衣基本都在膝盖以上，
-                // 以膝盖为界它们只会跟着上半身整体上移，不会被纵向拉长。
-                // 膝盖检测不可靠（被遮挡/位置不合理）时才退回胯部。
-                val knee = mid(p[25], p[26])
-                val kneeOk = knee.y > hip.y + 0.02f && knee.y < ankle.y - 0.04f
-                val legTopImg = if (kneeOk) knee.y else hip.y
+                    // 腿段上界优先取膝盖：裙子、长上衣基本都在膝盖以上，
+                    // 以膝盖为界它们只会跟着上半身整体上移，不会被纵向拉长。
+                    // 膝盖检测不可靠（被遮挡/位置不合理）时才退回胯部。
+                    val knee = mid(p[25], p[26])
+                    val kneeOk = knee.y > hip.y + 0.02f && knee.y < ankle.y - 0.04f
+                    val legTopImg = if (kneeOk) knee.y else hip.y
 
-                guide = guide.copy(
-                    bodyCenter = WarpGuide.toGL(hip.x, waistYImg),
-                    bodyHalfW = halfW.coerceIn(0.05f, 0.35f),
-                    waistY = 1f - waistYImg,
-                    hipY = 1f - hip.y,
-                    legTopY = 1f - legTopImg,
-                    ankleY = 1f - ankle.y,
-                    hasPose = true
-                )
+                    guide = guide.copy(
+                        bodyCenter = WarpGuide.toGL(hip.x, waistYImg),
+                        bodyHalfW = halfW.coerceIn(0.05f, 0.35f),
+                        waistY = 1f - waistYImg,
+                        hipY = 1f - hip.y,
+                        legTopY = 1f - legTopImg,
+                        ankleY = 1f - ankle.y,
+                        hasPose = true
+                    )
+                }
             }
         } catch (_: Exception) { /* 保留默认 */ }
 
@@ -159,6 +167,9 @@ class MediaPipeHelper(context: Context) {
                         bodyCenter = PointF(hp.centerX, waistY),
                         bodyHalfW = hp.waistHalfW,
                         waistY = waistY,
+                        // 人体外接框：无蒙版兜底时限制位移垂直范围，头顶上方背景不动
+                        bodyTopY = hp.bodyTopY,
+                        bodyBottomY = hp.bodyBottomY,
                         hasPose = usePose || hp.hasBody
                     )
                     return guide
