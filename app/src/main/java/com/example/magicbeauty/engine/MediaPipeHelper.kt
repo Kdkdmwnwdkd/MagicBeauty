@@ -54,16 +54,26 @@ class MediaPipeHelper(context: Context) {
     fun analyze(bitmap: Bitmap): WarpGuide {
         val mpImage: MPImage = BitmapImageBuilder(bitmap).build()
         var guide = WarpGuide()
+        // uv 是按宽高各自归一化的，算距离/半径时要换算到同一尺度（以图片高度为单位）
+        val aspect = bitmap.width.toFloat() / bitmap.height.toFloat().coerceAtLeast(1f)
         try {
             val faceRes = faceLandmarker.detect(mpImage)
             if (faceRes.faceLandmarks().isNotEmpty()) {
                 val lm = faceRes.faceLandmarks()[0]
+                val center = mid(lm[10], lm[152])
+                // 234 / 454 = 左右脸颊最外点，用它们算半脸宽（比用整张脸的包围盒稳）
+                val halfW = kotlin.math.abs(lm[234].x() - lm[454].x()) / 2f
+                // 眼角间距换算成“高度单位”，供大眼半径使用
+                val eyeDx = (lm[33].x() - lm[133].x()) * aspect
+                val eyeDy = lm[33].y() - lm[133].y()
+                val eyeW = kotlin.math.sqrt(eyeDx * eyeDx + eyeDy * eyeDy)
                 guide = guide.copy(
-                    faceCenter = WarpGuide.toGL(mid(lm[10], lm[152]).x, mid(lm[10], lm[152]).y),
-                    faceHalfH = kotlin.math.abs(lm[10].y() - lm[152].y()) / 2f,
+                    faceCenter = WarpGuide.toGL(center.x, center.y),
+                    faceHalfW = halfW.coerceIn(0.04f, 0.30f),
+                    faceHalfH = (kotlin.math.abs(lm[10].y() - lm[152].y()) / 2f).coerceIn(0.04f, 0.35f),
                     eyeL = WarpGuide.toGL(mid(lm[33], lm[133]).x, mid(lm[33], lm[133]).y),
                     eyeR = WarpGuide.toGL(mid(lm[263], lm[362]).x, mid(lm[263], lm[362]).y),
-                    eyeRadius = dist(lm[33], lm[133]) * 1.6f,
+                    eyeRadius = (eyeW * 1.35f).coerceIn(0.02f, 0.12f),
                     hasFace = true
                 )
             }
@@ -73,14 +83,17 @@ class MediaPipeHelper(context: Context) {
             val poseRes = poseLandmarker.detect(mpImage)
             if (poseRes.landmarks().isNotEmpty()) {
                 val p = poseRes.landmarks()[0]
-                val shoulderX = mid(p[11], p[12]).x
                 val hip = mid(p[23], p[24])
+                val shoulder = mid(p[11], p[12])
                 val ankle = mid(p[27], p[28])
-                val g2 = WarpGuide.toGL(shoulderX, hip.y)
+                // 腰在胯之上：取肩胯连线上、靠胯 25% 的位置（原来直接用胯，位置偏低）
+                val waistYImg = hip.y - 0.25f * (hip.y - shoulder.y)
+                // 腰宽约等于肩宽的 0.4 倍（肩宽 / 2 是半肩宽，再乘 0.8）
+                val halfW = dist(p[11], p[12]) * 0.40f
                 guide = guide.copy(
-                    bodyCenter = g2,
-                    bodyHalfW = dist(p[11], p[12]) / 2f,
-                    waistY = 1f - hip.y,         // 腰部 ≈ 胯部上沿
+                    bodyCenter = WarpGuide.toGL(hip.x, waistYImg),
+                    bodyHalfW = halfW.coerceIn(0.05f, 0.35f),
+                    waistY = 1f - waistYImg,
                     hipY = 1f - hip.y,
                     ankleY = 1f - ankle.y,
                     hasPose = true

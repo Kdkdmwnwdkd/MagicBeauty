@@ -130,6 +130,18 @@ class LocalEditEngine {
     fun render(params: EditParams, guide: WarpGuide = WarpGuide()): Bitmap {
         initGL()
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+
+        // 统一在这里做“没检测到就不变形”的兜底，视频/照片两条链路都不会再把效果套到画面中央。
+        // 另外：腿没拍全（胯到脚踝太短）时不做拉腿，否则会把上半身整体顶出画面。
+        val legOk = guide.hasPose && (guide.hipY - guide.ankleY) > 0.12f && guide.ankleY > 0.02f
+        val waistOk = guide.hasPose && guide.bodyHalfW > 0.03f
+        val eff = params.copy(
+            thinFace = if (guide.hasFace) params.thinFace else 0f,
+            eyeEnlarge = if (guide.hasFace) params.eyeEnlarge else 0f,
+            waistSlim = if (waistOk) params.waistSlim else 0f,
+            legStretch = if (legOk) params.legStretch else 0f
+        )
+
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboA)
         GLES20.glViewport(0, 0, width, height)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
@@ -140,20 +152,22 @@ class LocalEditEngine {
         bindQuad(warpProg)
         bindTex(warpProg, "uTex", texSrc, 0)
         val fc = guide.faceCenter; val el = guide.eyeL; val er = guide.eyeR; val bc = guide.bodyCenter
+        f(warpProg, "uAspect", width.toFloat() / height.toFloat().coerceAtLeast(1f))
         f(warpProg, "uFaceCenter", fc.x, fc.y)
+        f(warpProg, "uFaceHalfW", guide.faceHalfW)
         f(warpProg, "uFaceHalfH", guide.faceHalfH)
-        f(warpProg, "uThinFace", params.thinFace)
+        f(warpProg, "uThinFace", eff.thinFace)
         f(warpProg, "uEyeL", el.x, el.y)
         f(warpProg, "uEyeR", er.x, er.y)
         f(warpProg, "uEyeRadius", guide.eyeRadius)
-        f(warpProg, "uEyeEnlarge", params.eyeEnlarge)
+        f(warpProg, "uEyeEnlarge", eff.eyeEnlarge)
         f(warpProg, "uBodyCenter", bc.x, bc.y)
         f(warpProg, "uBodyHalfW", guide.bodyHalfW)
         f(warpProg, "uWaistY", guide.waistY)
-        f(warpProg, "uWaistSlim", params.waistSlim)
+        f(warpProg, "uWaistSlim", eff.waistSlim)
         f(warpProg, "uHipY", guide.hipY)
         f(warpProg, "uAnkleY", guide.ankleY)
-        f(warpProg, "uLegStretch", params.legStretch)
+        f(warpProg, "uLegStretch", eff.legStretch)
         drawQuad()
 
         // —— 段②：Adjust ——

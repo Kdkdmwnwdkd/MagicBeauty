@@ -106,9 +106,9 @@ class PhotoEditorFragment : Fragment() {
         binding.sbBlur.setOnSeekBarChangeListener(slider { params.blur = it / 100f })
         binding.sbVignette.setOnSeekBarChangeListener(slider { params.vignette = it / 100f })
         binding.sbThinFace.setOnSeekBarChangeListener(slider { params.thinFace = it / 100f })
-        binding.sbEye.setOnSeekBarChangeListener(slider { params.eyeEnlarge = it / 100f * 0.5f })
+        binding.sbEye.setOnSeekBarChangeListener(slider { params.eyeEnlarge = it / 100f * 0.35f })
         binding.sbWaist.setOnSeekBarChangeListener(slider { params.waistSlim = it / 100f })
-        binding.sbLeg.setOnSeekBarChangeListener(slider { params.legStretch = it / 100f * 0.3f })
+        binding.sbLeg.setOnSeekBarChangeListener(slider { params.legStretch = it / 100f * 0.25f })
     }
 
     private fun slider(onChange: (Int) -> Unit) = object : android.widget.SeekBar.OnSeekBarChangeListener {

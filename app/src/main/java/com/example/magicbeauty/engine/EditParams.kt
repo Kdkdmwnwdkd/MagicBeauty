@@ -28,6 +28,7 @@ data class EditParams(
  */
 data class WarpGuide(
     val faceCenter: PointF = PointF(0.5f, 0.55f),
+    val faceHalfW: Float = 0.11f,
     val faceHalfH: Float = 0.18f,
     val eyeL: PointF = PointF(0.4f, 0.6f),
     val eyeR: PointF = PointF(0.6f, 0.6f),
