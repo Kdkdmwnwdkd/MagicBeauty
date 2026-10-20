@@ -177,6 +177,7 @@ class LocalEditEngine {
             texMask = uploadMask(pm!!, guide.maskSize, texMask)
             maskRef = pm
             maskN = guide.maskSize
+            bindTex(warpProg, "uTex", texSrc, 0)   // 恢复单元 0
         }
         f(warpProg, "uHasMask", if (hasMask) 1f else 0f)
         val mtex = if (maskN > 0) 1.6f / maskN else 1.6f / 473f
@@ -310,6 +311,9 @@ class LocalEditEngine {
     private fun uploadMask(data: ByteArray, n: Int, reuse: Int): Int {
         val tex = IntArray(1)
         if (reuse == 0) GLES20.glGenTextures(1, tex, 0) else tex[0] = reuse
+        // 关键：必须切到纹理单元 1 再绑定。否则会把单元 0 上绑着的主图替换掉，
+        // uTex 采到的是蒙版本身 → 整张图变黑（之前那一版的黑屏就是这个原因）。
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
         val flipped = ByteArray(n * n)
         for (y in 0 until n) {
