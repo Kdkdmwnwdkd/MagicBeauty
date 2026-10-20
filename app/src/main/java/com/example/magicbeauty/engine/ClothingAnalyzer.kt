@@ -163,7 +163,7 @@ class ClothingAnalyzer(context: Context) {
         }
     }
 
-    /** 取 [from..to] 里有效列的中位数 */
+    /** 取指定列范围内有效行的中位数 */
     private fun medianOf(rows: IntArray, from: Int, to: Int): Int {
         val v = ArrayList<Int>()
         for (i in from..to) if (rows[i] >= 0) v.add(rows[i])
