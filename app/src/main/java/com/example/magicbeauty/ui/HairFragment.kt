@@ -126,8 +126,13 @@ class HairFragment : Fragment() {
 
     private fun save() {
         val bmp = resultBitmap ?: return
-        val ok = SaveUtils.saveBitmap(requireContext(), bmp, "magic_hair_${System.currentTimeMillis()}")
-        toast(if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）")
+        val ctx = context ?: return
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                SaveUtils.saveBitmap(ctx, bmp, "magic_hair_${System.currentTimeMillis()}")
+            }
+            toast(if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）")
+        }
     }
 
     private fun toast(msg: String) {

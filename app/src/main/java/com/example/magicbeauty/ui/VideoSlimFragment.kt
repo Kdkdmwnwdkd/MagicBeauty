@@ -133,12 +133,16 @@ class VideoSlimFragment : Fragment() {
 
     private fun save() {
         val data = resultBytes ?: return
-        val ok = SaveUtils.saveVideo(requireContext(), data)
-        Toast.makeText(
-            requireContext(),
-            if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）",
-            Toast.LENGTH_SHORT
-        ).show()
+        val ctx = context ?: return
+        // 视频几十 MB，写相册必须放到 IO 线程，否则很容易 ANR
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) { SaveUtils.saveVideo(ctx, data) }
+            Toast.makeText(
+                ctx,
+                if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     override fun onDestroyView() {

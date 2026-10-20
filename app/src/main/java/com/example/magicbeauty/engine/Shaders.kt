@@ -141,7 +141,8 @@ object Shaders {
             // 暗角
             if (uVignette > 0.001) {
                 vec2 d = uv - 0.5;
-                float v = smoothstep(0.8, 0.2, dot(d, d) * 2.0);
+                // 注意：smoothstep 要求 edge0 < edge1，反过来在部分 GPU 上是未定义行为
+                float v = 1.0 - smoothstep(0.2, 0.8, dot(d, d) * 2.0);
                 col *= mix(1.0, v, uVignette);
             }
 

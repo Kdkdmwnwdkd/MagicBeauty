@@ -98,10 +98,15 @@ class PhotoEditorFragment : Fragment() {
                 toast("图片读取失败")
                 return@launch
             }
-            val pair = withContext(glDispatcher) {
-                val src = engine.setSource(bmp)
-                val g = try { mp.analyze(src) } catch (_: Exception) { WarpGuide() }
-                src to g
+            val pair = try {
+                withContext(glDispatcher) {
+                    val src = engine.setSource(bmp)
+                    val g = try { mp.analyze(src) } catch (_: Exception) { WarpGuide() }
+                    src to g
+                }
+            } catch (e: Exception) {
+                toast("图片处理失败：${e.message}")
+                return@launch
             }
             sourceBitmap = pair.first
             guide = pair.second
@@ -145,8 +150,12 @@ class PhotoEditorFragment : Fragment() {
             toast("还没有可保存的结果")
             return
         }
-        val ok = SaveUtils.saveBitmap(requireContext(), bmp)
-        toast(if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）")
+        val ctx = context ?: return
+        // 写相册是 IO 操作，不要放主线程（大图会卡顿）
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) { SaveUtils.saveBitmap(ctx, bmp) }
+            toast(if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）")
+        }
     }
 
     private fun toast(msg: String) {
