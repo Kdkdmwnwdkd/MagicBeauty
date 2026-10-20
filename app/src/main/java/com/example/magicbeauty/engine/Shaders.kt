@@ -425,8 +425,10 @@ object Shaders {
                 float cs = cos(t.w);
                 float sn = sin(t.w);
                 q = vec2(q.x * cs - q.y * sn, q.x * sn + q.y * cs);
-                float half = max(t.z * 0.5, 0.001);
-                vec2 lt = q / (2.0 * half) + 0.5;
+                // 注意：half / fixed / input / output 等是 GLSL ES 保留字，
+                // 部分严格编译器会直接报 "'half' : Reserved word."，变量名必须避开
+                float halfSize = max(t.z * 0.5, 0.001);
+                vec2 lt = q / (2.0 * halfSize) + 0.5;
                 if (lt.x >= 0.0 && lt.x <= 1.0 && lt.y >= 0.0 && lt.y <= 1.0) {
                     vec4 s = texture2D(uLayers[i], lt);
                     col = mix(col, s.rgb, s.a);

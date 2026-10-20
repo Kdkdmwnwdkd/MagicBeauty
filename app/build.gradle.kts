@@ -1,18 +1,48 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// ============================================================
+// 签名密钥读取：优先环境变量 → keystore.properties → 仓库内置默认值
+// 密钥文件默认 app/keystore/magicbeauty.jks（已随仓库提交，保证签名恒定）
+// ============================================================
+
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+
+fun secret(key: String, fallback: String? = null): String? {
+    val env = System.getenv(key)
+    if (!env.isNullOrBlank()) return env
+    val v = keystoreProps.getProperty(key)
+    if (!v.isNullOrBlank()) return v
+    return fallback
 }
 
 android {
     namespace = "com.example.magicbeauty"
     compileSdk = 34
 
+    signingConfigs {
+        create("shared") {
+            val storePath = secret("MAGICBEESTORE_FILE", "app/keystore/magicbeauty.jks")
+            storeFile = rootProject.file(storePath!!)
+            storePassword = secret("MAGICBEESTORE_PASSWORD", "magicbeauty2027")
+            keyAlias = secret("MAGICBEESTORE_KEY_ALIAS", "magicbeauty")
+            keyPassword = secret("MAGICBEESTORE_KEY_PASSWORD", "magicbeauty2027")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.example.magicbeauty"
         minSdk = 24
         targetSdk = 34
-        versionCode = 27
-        versionName = "2.7.1"
+        versionCode = 28
+        versionName = "2.7.2"
 
         // 仅保留常用 ABI，缩小包体
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -21,9 +51,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            // debug 也用同一把固定密钥，保证本地包与线上包可互相覆盖安装
+            signingConfig = signingConfigs.getByName("shared")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("shared")
         }
     }
 

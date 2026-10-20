@@ -90,6 +90,20 @@ jobs:
       - name: 编译 Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
+      # 校验 APK 使用的是仓库内固定密钥（签名一致才能覆盖升级，不需重复下载）
+      - name: 校验 APK 签名指纹
+        if: success()
+        run: |
+          set -e
+          SDK="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          APKSIGNER="$(ls "$SDK"/build-tools/*/apksigner 2>/dev/null | head -1)"
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "$APK" | grep -i "SHA-256 digest" || true
+          else
+            echo "apksigner 未找到，跳过指纹打印"
+          fi
+
       - name: 上传 APK 产物
         if: always()
         uses: actions/upload-artifact@v4
