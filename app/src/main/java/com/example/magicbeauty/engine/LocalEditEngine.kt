@@ -224,11 +224,8 @@ class LocalEditEngine {
         val pixels = IntArray(bmp.width * bmp.height)
         bmp.getPixels(pixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
         val need = pixels.size * 4
-        var buf = uploadBuf
-        if (buf == null || buf.capacity() < need) {
-            buf = ByteBuffer.allocateDirect(need).order(ByteOrder.nativeOrder())
-            uploadBuf = buf
-        }
+        val buf = uploadBuf?.takeIf { it.capacity() >= need }
+            ?: ByteBuffer.allocateDirect(need).order(ByteOrder.nativeOrder()).also { uploadBuf = it }
         buf.clear()
         buf.asIntBuffer().put(pixels)
         GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, bmp.width, bmp.height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
@@ -242,30 +239,19 @@ class LocalEditEngine {
     private fun readFramebuffer(fbo: Int): Bitmap {
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
         val need = width * height * 4
-        var buf = readBuf
-        if (buf == null || buf.capacity() < need) {
-            buf = ByteBuffer.allocateDirect(need).order(ByteOrder.nativeOrder())
-            readBuf = buf
-        }
+        val buf = readBuf?.takeIf { it.capacity() >= need }
+            ?: ByteBuffer.allocateDirect(need).order(ByteOrder.nativeOrder()).also { readBuf = it }
         buf.clear()
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
         // 注意：allocateDirect 的 Buffer 没有可访问的 backing array，
         // 调 buf.array() 会抛 UnsupportedOperationException（这正是之前必崩的原因）。
         // 正确做法是先把数据读进普通 ByteArray。
-        var bytes = readBytes
-        if (bytes == null || bytes.size < need) {
-            bytes = ByteArray(need)
-            readBytes = bytes
-        }
+        val bytes = readBytes?.takeIf { it.size >= need } ?: ByteArray(need).also { readBytes = it }
         buf.position(0)
         buf.get(bytes, 0, need)
 
-        var pixels = readPixels
         val pxCount = width * height
-        if (pixels == null || pixels.size < pxCount) {
-            pixels = IntArray(pxCount)
-            readPixels = pixels
-        }
+        val pixels = readPixels?.takeIf { it.size >= pxCount } ?: IntArray(pxCount).also { readPixels = it }
         for (y in 0 until height) {
             val srcRow = (height - 1 - y) * width * 4
             val dstRow = y * width
