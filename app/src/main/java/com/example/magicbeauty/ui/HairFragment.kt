@@ -29,13 +29,30 @@ class HairFragment : Fragment() {
     private val binding get() = _binding!!
 
     private var imageUri: Uri? = null
+    private var sourceBitmap: Bitmap? = null
     private var resultBitmap: Bitmap? = null
     private var segmenter: HairSegmenter? = null
 
     private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-            imageUri = it
-            if (_binding != null) binding.btnGen.isEnabled = true
+        uri ?: return@registerForActivityResult
+        imageUri = uri
+        if (_binding == null) return@registerForActivityResult
+        // 选完先给个预览，同时把解码结果留住，生成时不再重复解码
+        binding.btnGen.isEnabled = false
+        binding.btnSave.isEnabled = false
+        resultBitmap = null
+        lifecycleScope.launch {
+            val ctx = context ?: return@launch
+            val bmp = withContext(Dispatchers.IO) { BitmapUtils.decodeSampled(ctx, uri, 1280) }
+            if (bmp == null) {
+                toast("图片读取失败")
+                return@launch
+            }
+            sourceBitmap = bmp
+            if (_binding != null) {
+                binding.preview.setImageBitmap(bmp)
+                binding.btnGen.isEnabled = true
+            }
         }
     }
 
@@ -64,8 +81,8 @@ class HairFragment : Fragment() {
             try {
                 if (useLocal) {
                     // 端侧托底：离线换发色，只作用于头发区域
-                    val src = withContext(Dispatchers.IO) {
-                        BitmapUtils.decodeSampled(ctx, uri, 1600)
+                    val src = sourceBitmap ?: withContext(Dispatchers.IO) {
+                        BitmapUtils.decodeSampled(ctx, uri, 1280)
                     } ?: throw Exception("图片读取失败")
 
                     var usedMask = true
@@ -89,7 +106,7 @@ class HairFragment : Fragment() {
                     val prompt = binding.etPrompt.text.toString()
                         .ifBlank { "flowing long wavy hair with wispy strands, silky, anime style" }
 
-                    val bmp = withContext(Dispatchers.IO) {
+                    val bmp = sourceBitmap ?: withContext(Dispatchers.IO) {
                         BitmapUtils.decodeSampled(ctx, uri, 1280)
                     } ?: throw Exception("图片读取失败")
 

@@ -75,38 +75,6 @@ class SiliconFlowImageApi {
             }
         }
 
-    /** 纯提示词生成（不传原图），保留给以后扩展用。 */
-    suspend fun generateByPrompt(prompt: String): ByteArray = withContext(Dispatchers.IO) {
-        val key = ApiConfig.siliconFlowKey
-        require(key.isNotBlank()) { "未配置硅基流动密钥，请到 App 底部「设置」页填写" }
-        val payload = gson.toJson(
-            mapOf(
-                "model" to "Kwai-Kolors/Kolors",
-                "prompt" to prompt,
-                "image_size" to "1024x1024"
-            )
-        )
-        val request = Request.Builder()
-            .url("${ApiConfig.SILICONFLOW_URL}/generations")
-            .addHeader("Authorization", "Bearer $key")
-            .addHeader("Content-Type", "application/json")
-            .post(payload.toRequestBody("application/json".toMediaType()))
-            .build()
-        client.newCall(request).execute().use { resp ->
-            val raw = resp.body?.string().orEmpty()
-            require(resp.isSuccessful) { "SiliconFlow 返回 ${resp.code}: ${raw.take(300)}" }
-            val json = gson.fromJson(raw, Map::class.java)
-            val image = (json["images"] as? List<*>)?.firstOrNull() as? Map<*, *>
-            val url = image?.get("url") as? String
-            val b64 = image?.get("b64_json") as? String
-            when {
-                url != null -> download(url)
-                b64 != null -> Base64.decode(b64, Base64.NO_WRAP)
-                else -> error("未找到图片: ${raw.take(300)}")
-            }
-        }
-    }
-
     private fun download(url: String): ByteArray {
         val req = Request.Builder().url(url).get().build()
         return client.newCall(req).execute().use { it.body?.bytes() ?: byteArrayOf() }

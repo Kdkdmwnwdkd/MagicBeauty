@@ -129,7 +129,8 @@ class LocalVideoSlimEngine(private val context: Context) {
                         if (image != null) {
                             try {
                                 val bmp = yuvToBitmap(image)
-                                if (frameNo % 10 == 0) {
+                                // 关键点变化很慢，每 15 帧更新一次即可，减少推理耗时
+                                if (frameNo % 15 == 0) {
                                     try { guide = mp.analyze(bmp) } catch (_: Exception) {}
                                 }
                                 // 限制处理分辨率：4K 逐帧位图会 OOM（手机端没必要按 4K 处理）
@@ -486,7 +487,8 @@ class LocalVideoSlimEngine(private val context: Context) {
 
     private fun createEncoder(w: Int, h: Int, frameRate: Int, color: Int): MediaCodec {
         val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
-            setInteger(MediaFormat.KEY_BIT_RATE, (w * h * 4).coerceAtLeast(2_000_000))
+            // 码率适当降低：文件更小、编码更快，手机上看画质足够
+            setInteger(MediaFormat.KEY_BIT_RATE, (w * h * 2).coerceAtLeast(2_000_000))
             setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             setInteger(MediaFormat.KEY_COLOR_FORMAT, color)

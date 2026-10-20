@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.magicbeauty"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         // 仅保留常用 ABI，缩小包体
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -46,13 +46,6 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4")
-
-    // 相机（本地取流）
-    implementation("androidx.camera:camera-core:1.3.4")
-    implementation("androidx.camera:camera-camera2:1.3.4")
-    implementation("androidx.camera:camera-lifecycle:1.3.4")
-    implementation("androidx.camera:camera-view:1.3.4")
 
     // MediaPipe（本地人脸/人体关键点，开源免费）
     implementation("com.google.mediapipe:tasks-vision:0.10.29")

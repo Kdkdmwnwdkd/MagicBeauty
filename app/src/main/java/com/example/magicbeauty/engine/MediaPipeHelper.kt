@@ -9,7 +9,6 @@ import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.core.RunningMode
-import java.util.concurrent.Executors
 
 /**
  * 用 MediaPipe（开源、本地、免费）提取人脸 468 点与人体 33 点，
@@ -19,7 +18,6 @@ import java.util.concurrent.Executors
 class MediaPipeHelper(context: Context) {
 
     private val appContext = context.applicationContext
-    private val executor = Executors.newSingleThreadExecutor()
 
     private var faceCreated = false
     private var poseCreated = false
@@ -95,7 +93,6 @@ class MediaPipeHelper(context: Context) {
         // 只关已经真正创建过的，避免 close() 反过来把 lazy 模型加载一遍
         if (faceCreated) try { faceLandmarker.close() } catch (_: Exception) {}
         if (poseCreated) try { poseLandmarker.close() } catch (_: Exception) {}
-        executor.shutdown()
     }
 
     private fun mid(a: com.google.mediapipe.tasks.components.containers.NormalizedLandmark,
