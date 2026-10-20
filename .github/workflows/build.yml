@@ -9,6 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: write   # 允许自动创建/更新 Release
 
     steps:
       - name: 检出代码
@@ -95,6 +97,25 @@ jobs:
           name: magicbeauty-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
+
+      - name: 读取版本号
+        if: success()
+        id: ver
+        run: echo "V=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
+
+      # 构建成功即自动发布/更新同名 Release，手机浏览器收藏
+      # releases/latest 页面即可永远拿到最新 APK（替代 artifact 90 天失效+需解压）
+      - name: 发布到 GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.V }}
+          name: MagicBeauty v${{ steps.ver.outputs.V }}
+          body: |
+            自动构建发布。更新内容见 git log。
+            手机浏览器直接下载本页面的 APK 安装即可（约 137MB，首次打开需加载人体解析模型）。
+          files: app/build/outputs/apk/debug/*.apk
+          fail_on_unmatched_files: true
 
       - name: 打印 APK 路径
         if: success()
