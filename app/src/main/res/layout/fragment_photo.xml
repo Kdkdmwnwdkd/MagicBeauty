@@ -159,7 +159,6 @@
                 android:layout_weight="1"
                 android:background="@drawable/bg_tab"
                 android:gravity="center"
-                android:selected="true"
                 android:text="光影"
                 android:textColor="@color/tab_text"
                 android:textSize="13sp" />
