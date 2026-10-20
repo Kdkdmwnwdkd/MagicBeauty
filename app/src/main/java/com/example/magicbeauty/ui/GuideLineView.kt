@@ -75,8 +75,10 @@ class GuideLineView @JvmOverloads constructor(
     }
 
     private fun updateImgRect() {
-        val ew = (width - paddingLeft - paddingRight).coerceAtLeast(1f)
-        val eh = (height - paddingTop - paddingBottom).coerceAtLeast(1f)
+        // width/height 是 Int：必须先 toFloat，否则 coerceAtLeast(1f) 类型不符、
+        // 且 ew/imgW 会变成 Int 除法直接得 0
+        val ew = (width - paddingLeft - paddingRight).toFloat().coerceAtLeast(1f)
+        val eh = (height - paddingTop - paddingBottom).toFloat().coerceAtLeast(1f)
         val scale = min(ew / imgW, eh / imgH)
         val dispW = imgW * scale
         val dispH = imgH * scale
