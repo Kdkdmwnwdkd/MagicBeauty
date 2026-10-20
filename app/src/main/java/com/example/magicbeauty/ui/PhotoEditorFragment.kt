@@ -81,7 +81,7 @@ class PhotoEditorFragment : Fragment() {
         selectTab(0)
 
         // 面板高度变化（收起/展开/切换分类）时重算图片可用区域
-        binding.toolSheet.addOnLayoutChangeListener { _, _, top, _, bottom, oTop, _, oBottom ->
+        binding.toolSheet.addOnLayoutChangeListener { _, _, top, _, bottom, _, oTop, _, oBottom ->
             if (bottom - top != oBottom - oTop) updatePreviewInsets()
         }
         updatePreviewInsets()
