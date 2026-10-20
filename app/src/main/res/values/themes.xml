@@ -54,4 +54,17 @@
         <item name="android:textSize">12sp</item>
         <item name="android:textColor">@color/text_sub</item>
     </style>
+
+    <!-- 滤镜标签 -->
+    <style name="FilterChip">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">32dp</item>
+        <item name="android:layout_marginEnd">6dp</item>
+        <item name="android:background">@drawable/bg_tab</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">13dp</item>
+        <item name="android:paddingEnd">13dp</item>
+        <item name="android:textColor">@color/tab_text</item>
+        <item name="android:textSize">12sp</item>
+    </style>
 </resources>

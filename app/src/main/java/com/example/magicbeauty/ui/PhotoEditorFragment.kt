@@ -105,6 +105,17 @@ class PhotoEditorFragment : Fragment() {
         binding.sbWarmth.setOnSeekBarChangeListener(slider { params.warmth = it / 100f * 2f - 1f })
         binding.sbBlur.setOnSeekBarChangeListener(slider { params.blur = it / 100f })
         binding.sbVignette.setOnSeekBarChangeListener(slider { params.vignette = it / 100f })
+
+        // 滤镜：一排标签，点哪个套哪个（矩阵在 GPU 一次算完）
+        val chips = (0 until binding.filterRow.childCount).map { binding.filterRow.getChildAt(it) }
+        chips.forEachIndexed { i, v ->
+            v.isSelected = i == params.filterId
+            v.setOnClickListener {
+                params.filterId = i
+                chips.forEachIndexed { j, c -> c.isSelected = j == i }
+                if (sourceBitmap != null) renderPreview()
+            }
+        }
         binding.sbThinFace.setOnSeekBarChangeListener(slider { params.thinFace = it / 100f })
         binding.sbEye.setOnSeekBarChangeListener(slider { params.eyeEnlarge = it / 100f * 0.35f })
         binding.sbWaist.setOnSeekBarChangeListener(slider { params.waistSlim = it / 100f })

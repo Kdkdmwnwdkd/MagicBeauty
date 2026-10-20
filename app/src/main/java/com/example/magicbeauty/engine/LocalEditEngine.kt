@@ -184,6 +184,9 @@ class LocalEditEngine {
         f(adjustProg, "uWarmth", params.warmth)
         f(adjustProg, "uBlur", params.blur)
         f(adjustProg, "uVignette", params.vignette)
+        val preset = Filters.get(params.filterId)
+        mat3(adjustProg, "uFilterMat", preset.m)
+        vec3(adjustProg, "uFilterOff", preset.off)
         drawQuad()
 
         return readFramebuffer(fboB)
@@ -345,5 +348,14 @@ class LocalEditEngine {
 
     private fun f(prog: Int, name: String, x: Float, y: Float) {
         GLES20.glUniform2f(GLES20.glGetUniformLocation(prog, name), x, y)
+    }
+
+    /** 3x3 色彩矩阵。我们的矩阵都是对称阵，行/列主序一致，直接用 transpose=false。 */
+    private fun mat3(prog: Int, name: String, m: FloatArray) {
+        GLES20.glUniformMatrix3fv(GLES20.glGetUniformLocation(prog, name), 1, false, m, 0)
+    }
+
+    private fun vec3(prog: Int, name: String, v: FloatArray) {
+        GLES20.glUniform3fv(GLES20.glGetUniformLocation(prog, name), 1, v, 0)
     }
 }

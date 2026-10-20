@@ -14,6 +14,7 @@ data class EditParams(
     var warmth: Float = 0f,
     var blur: Float = 0f,        // 磨皮
     var vignette: Float = 0f,
+    var filterId: Int = 0,       // 滤镜预设（见 Filters.presets）
     // 人脸形变
     var thinFace: Float = 0f,    // 瘦脸
     var eyeEnlarge: Float = 0f,  // 大眼

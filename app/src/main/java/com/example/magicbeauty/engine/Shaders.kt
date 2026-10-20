@@ -70,6 +70,7 @@ object Shaders {
             // ---------- ① 拉腿：分段映射 ----------
             // 脚踝以下（脚、鞋）保持原样，只把「胯 → 脚踝」这一段按比例拉长，
             // 拉长的部分由胯以上整体上移吸收。所以不会有“鞋不动、脚被拉长”。
+            // 横向再做一层「只在人体附近生效」的权重，否则门框、墙角这类竖线会被一起拉弯。
             if (uLegStretch > 0.001) {
                 float L = max(uHipY - uAnkleY, 0.02);
                 float delta = min(uLegStretch * L, 0.08);   // 上移量最多占画面高 8%，避免裁掉头顶
@@ -81,6 +82,11 @@ object Shaders {
                 } else if (y > uAnkleY) {
                     y = uAnkleY + (y - uAnkleY) / s;
                 }
+                // 超高斯横向权重：身体范围内 ≈1，到 2.2 倍半宽处基本为 0，
+                // 这样人体被完整拉伸，旁边的门/墙角保持不动。
+                float dxb = abs(uv.x - uBodyCenter.x) / max(uBodyHalfW, 0.02);
+                float wx = exp(-pow(dxb / 1.8, 4.0));
+                y = mix(uv.y, y, wx);
                 uv.y = y;
             }
 
@@ -119,7 +125,7 @@ object Shaders {
         }
     """
 
-    // ---- ② 调色 + 磨皮段 ----
+    // ---- ② 调色 + 磨皮 + 滤镜 ----
     const val ADJUST_FRAG = """
         precision mediump float;
         varying vec2 vUV;
@@ -132,21 +138,62 @@ object Shaders {
         uniform float uBlur;         // 0..1 磨皮强度
         uniform float uVignette;     // 0..1 暗角
 
+        uniform mat3  uFilterMat;    // 滤镜色彩矩阵（行主序传入）
+        uniform vec3  uFilterOff;    // 滤镜偏移
+
         float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+        // 肤色权重：偏暖、不太暗、不过曝。用来避免把背景/头发一起糊掉
+        float skinMask(vec3 c) {
+            float y = luma(c);
+            float chroma = c.r - c.b;
+            float m1 = smoothstep(0.004, 0.055, chroma);
+            float m2 = 1.0 - smoothstep(0.55, 0.86, y);
+            float m3 = smoothstep(0.08, 0.20, y);
+            return clamp(m1 * m2 * m3, 0.0, 1.0);
+        }
 
         void main() {
             vec2 uv = vUV;
-            vec3 col = texture2D(uTex, uv).rgb;
+            vec3 c0 = texture2D(uTex, uv).rgb;
+            vec3 col = c0;
 
-            // 5 点模糊近似磨皮
-            vec3 b = texture2D(uTex, uv + vec2(uTexel.x, 0.0)).rgb
-                   + texture2D(uTex, uv - vec2(uTexel.x, 0.0)).rgb
-                   + texture2D(uTex, uv + vec2(0.0, uTexel.y)).rgb
-                   + texture2D(uTex, uv - vec2(0.0, uTexel.y)).rgb
-                   + col;
-            b /= 5.0;
-            float mask = clamp(1.0 - abs(luma(col) - 0.6) * 1.6, 0.0, 1.0); // 偏中调(肤色)
-            col = mix(col, b, mask * uBlur);
+            // ---------- 磨皮：边缘保持的双边滤波（8 邻域） ----------
+            // 旧版是 5 点均值模糊，会把眼睛、发丝一起糊掉，看起来“假滑”。
+            // 这里每个采样点按“与中心的颜色差”加权：颜色差越大权重越小，
+            // 所以皮肤被磨平，五官/发丝边缘保留。
+            if (uBlur > 0.001) {
+                float r = 1.0 + uBlur * 2.2;
+                float sigma = 90.0;
+                vec3 acc = c0;
+                float ws = 1.0;
+                vec3 s;
+                float w;
+
+                s = texture2D(uTex, uv + vec2( r, 0.0) * uTexel).rgb;
+                w = exp(-dot(s - c0, s - c0) * sigma); acc += s * w; ws += w;
+                s = texture2D(uTex, uv + vec2(-r, 0.0) * uTexel).rgb;
+                w = exp(-dot(s - c0, s - c0) * sigma); acc += s * w; ws += w;
+                s = texture2D(uTex, uv + vec2(0.0,  r) * uTexel).rgb;
+                w = exp(-dot(s - c0, s - c0) * sigma); acc += s * w; ws += w;
+                s = texture2D(uTex, uv + vec2(0.0, -r) * uTexel).rgb;
+                w = exp(-dot(s - c0, s - c0) * sigma); acc += s * w; ws += w;
+
+                float d = r * 0.7071;
+                s = texture2D(uTex, uv + vec2( d,  d) * uTexel).rgb;
+                w = exp(-dot(s - c0, s - c0) * sigma); acc += s * w; ws += w;
+                s = texture2D(uTex, uv + vec2(-d,  d) * uTexel).rgb;
+                w = exp(-dot(s - c0, s - c0) * sigma); acc += s * w; ws += w;
+                s = texture2D(uTex, uv + vec2( d, -d) * uTexel).rgb;
+                w = exp(-dot(s - c0, s - c0) * sigma); acc += s * w; ws += w;
+                s = texture2D(uTex, uv + vec2(-d, -d) * uTexel).rgb;
+                w = exp(-dot(s - c0, s - c0) * sigma); acc += s * w; ws += w;
+
+                vec3 blur = acc / ws;
+                // 皮肤区域全强度；非皮肤只给 25%，避免背景糊成一片
+                float m = mix(0.25, 1.0, skinMask(c0));
+                col = mix(c0, blur, uBlur * m);
+            }
 
             // 亮度 / 对比度
             col += uBrightness;
@@ -160,10 +207,13 @@ object Shaders {
             col.r += uWarmth * 0.05;
             col.b -= uWarmth * 0.05;
 
+            // 滤镜（色彩矩阵 + 偏移）
+            col = clamp(uFilterMat * col + uFilterOff, 0.0, 1.0);
+
             // 暗角（smoothstep 必须 edge0 < edge1）
             if (uVignette > 0.001) {
-                vec2 d = uv - 0.5;
-                float v = 1.0 - smoothstep(0.2, 0.8, dot(d, d) * 2.0);
+                vec2 d2 = uv - 0.5;
+                float v = 1.0 - smoothstep(0.2, 0.8, dot(d2, d2) * 2.0);
                 col *= mix(1.0, v, uVignette);
             }
 
