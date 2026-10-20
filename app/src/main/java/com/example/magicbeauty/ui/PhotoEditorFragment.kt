@@ -49,6 +49,7 @@ class PhotoEditorFragment : Fragment() {
 
     private var rendering = false
     private var pendingRender = false
+    private var renderErrorShown = false
 
     private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@registerForActivityResult
@@ -133,8 +134,14 @@ class PhotoEditorFragment : Fragment() {
                 // 在后台线程 recycle 会偶发 "trying to use a recycled bitmap" 崩溃。
                 lastResult = out
                 binding.preview.setImageBitmap(out)
-            } catch (_: Exception) {
-                // 单次渲染失败不闪退，交给下一次
+                binding.emptyState.visibility = View.GONE
+            } catch (e: Exception) {
+                // 不要静默吞掉：渲染失败必须能看见，否则就是“选了图没反应”
+                android.util.Log.e("MagicBeauty", "render failed", e)
+                if (!renderErrorShown) {
+                    renderErrorShown = true
+                    toast("预览失败：${e.message}")
+                }
             } finally {
                 rendering = false
                 if (pendingRender) {

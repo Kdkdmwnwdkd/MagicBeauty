@@ -2,18 +2,18 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:id="@+id/nav_photo"
-        android:icon="@android:drawable/ic_menu_gallery"
+        android:icon="@drawable/ic_tab_photo"
         android:title="@string/tab_photo" />
     <item
         android:id="@+id/nav_video"
-        android:icon="@android:drawable/ic_menu_slideshow"
+        android:icon="@drawable/ic_tab_video"
         android:title="@string/tab_video" />
     <item
         android:id="@+id/nav_hair"
-        android:icon="@android:drawable/ic_menu_edit"
+        android:icon="@drawable/ic_tab_hair"
         android:title="@string/tab_hair" />
     <item
         android:id="@+id/nav_settings"
-        android:icon="@android:drawable/ic_menu_preferences"
+        android:icon="@drawable/ic_tab_settings"
         android:title="@string/tab_settings" />
 </menu>

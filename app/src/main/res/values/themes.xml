@@ -1,7 +1,57 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Theme.MagicBeauty" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/purple_500</item>
-        <item name="colorPrimaryDark">@color/purple_700</item>
-        <item name="colorAccent">@color/purple_500</item>
+
+    <style name="Theme.MagicBeauty" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/brand</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/brand_soft</item>
+        <item name="colorOnPrimaryContainer">@color/text</item>
+        <item name="colorSecondary">@color/brand_2</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="colorSecondaryContainer">@color/brand_soft</item>
+        <item name="colorOnSecondaryContainer">@color/text</item>
+
+        <item name="colorSurface">@color/card</item>
+        <item name="colorOnSurface">@color/text</item>
+        <item name="colorSurfaceVariant">@color/bg_elev</item>
+        <item name="colorOnSurfaceVariant">@color/text_sub</item>
+        <item name="colorOutline">@color/card_stroke</item>
+        <item name="colorOutlineVariant">@color/card_stroke</item>
+
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/nav_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+        <item name="android:colorAccent">@color/brand</item>
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:textColorSecondary">@color/text_sub</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
+    </style>
+
+    <!-- 细轨道 + 小圆点的滑块 -->
+    <style name="AppSeekBar" parent="Widget.AppCompat.SeekBar">
+        <item name="android:progressDrawable">@drawable/seekbar_track</item>
+        <item name="android:thumb">@drawable/seekbar_thumb</item>
+        <item name="android:splitTrack">false</item>
+        <item name="android:minHeight">30dp</item>
+        <item name="android:maxHeight">30dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+    </style>
+
+    <!-- 卡片标题 -->
+    <style name="CardTitle">
+        <item name="android:textSize">12.5sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/brand</item>
+        <item name="android:letterSpacing">0.06</item>
+    </style>
+
+    <!-- 滑块左侧标签 -->
+    <style name="SliderLabel">
+        <item name="android:layout_width">62dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/text_sub</item>
     </style>
 </resources>

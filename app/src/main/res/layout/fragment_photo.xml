@@ -1,69 +1,410 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="12dp">
+    android:background="@color/bg"
+    android:orientation="vertical"
+    android:paddingStart="16dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="8dp">
 
+    <!-- 标题 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="照片编辑"
+                android:textColor="@color/text"
+                android:textSize="21sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="本地处理 · 不上传 · 不耗 API"
+                android:textColor="@color/text_sub"
+                android:textSize="11.5sp" />
+        </LinearLayout>
 
         <TextView
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="本地修图（不上传、不耗API）"
-            android:textStyle="bold"
-            android:textSize="16sp" />
+            android:background="@drawable/bg_pill"
+            android:paddingStart="10dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="5dp"
+            android:text="离线"
+            android:textColor="@color/brand"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 预览 -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:layout_weight="1"
+        android:minHeight="170dp"
+        android:background="@drawable/bg_preview">
 
         <ImageView
             android:id="@+id/preview"
             android:layout_width="match_parent"
-            android:layout_height="320dp"
-            android:scaleType="fitCenter"
-            android:background="#22000000" />
+            android:layout_height="match_parent"
+            android:contentDescription="预览"
+            android:scaleType="fitCenter" />
+
+        <LinearLayout
+            android:id="@+id/emptyState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="还没有选择照片"
+                android:textColor="@color/text_sub"
+                android:textSize="14sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="点下方「选择图片」从相册挑一张"
+                android:textColor="@color/text_dim"
+                android:textSize="11.5sp" />
+        </LinearLayout>
 
         <ProgressBar
             android:id="@+id/progress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:indeterminateTint="@color/brand"
             android:visibility="gone" />
+    </FrameLayout>
 
-        <Button
+    <!-- 选择 / 保存 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnPick"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="选择图片" />
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="选择图片"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            app:cornerRadius="14dp" />
 
-        <!-- 10 个调节滑块，id 唯一 -->
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="亮度" />
-        <SeekBar android:id="@+id/sbBrightness" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="对比度" />
-        <SeekBar android:id="@+id/sbContrast" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="饱和度" />
-        <SeekBar android:id="@+id/sbSaturation" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="冷暖" />
-        <SeekBar android:id="@+id/sbWarmth" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="磨皮" />
-        <SeekBar android:id="@+id/sbBlur" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="暗角" />
-        <SeekBar android:id="@+id/sbVignette" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="瘦脸" />
-        <SeekBar android:id="@+id/sbThinFace" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="大眼" />
-        <SeekBar android:id="@+id/sbEye" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="瘦腰" />
-        <SeekBar android:id="@+id/sbWaist" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="拉腿/调身高" />
-        <SeekBar android:id="@+id/sbLeg" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="0" />
+        <Space
+            android:layout_width="10dp"
+            android:layout_height="1dp" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnSave"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:enabled="false"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="保存到相册"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            app:cornerRadius="14dp" />
+    </LinearLayout>
+
+    <!-- 调节面板 -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="10dp"
+        android:layout_weight="1.15"
+        android:clipToPadding="false"
+        android:paddingBottom="2dp"
+        android:scrollbars="none">
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="保存到相册"
-            android:enabled="false" />
+            android:orientation="vertical">
 
-    </LinearLayout>
-</ScrollView>
+            <!-- 光影 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    style="@style/CardTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="光影" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="亮度" />
+
+                    <SeekBar
+                        android:id="@+id/sbBrightness"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="50" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="对比度" />
+
+                    <SeekBar
+                        android:id="@+id/sbContrast"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="50" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="饱和度" />
+
+                    <SeekBar
+                        android:id="@+id/sbSaturation"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="50" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="冷暖" />
+
+                    <SeekBar
+                        android:id="@+id/sbWarmth"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="50" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 质感 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    style="@style/CardTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="质感" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="磨皮" />
+
+                    <SeekBar
+                        android:id="@+id/sbBlur"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="暗角" />
+
+                    <SeekBar
+                        android:id="@+id/sbVignette"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 塑形 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    style="@style/CardTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="塑形" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="瘦脸" />
+
+                    <SeekBar
+                        android:id="@+id/sbThinFace"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="大眼" />
+
+                    <SeekBar
+                        android:id="@+id/sbEye"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="瘦腰" />
+
+                    <SeekBar
+                        android:id="@+id/sbWaist"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/SliderLabel"
+                        android:text="拉腿" />
+
+                    <SeekBar
+                        android:id="@+id/sbLeg"
+                        style="@style/AppSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

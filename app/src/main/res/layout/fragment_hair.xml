@@ -1,84 +1,216 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/bg"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:paddingStart="16dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="8dp">
 
-    <TextView
+    <!-- 标题 -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="AI 生成头发丝（生成式大模型）"
-        android:textStyle="bold"
-        android:textSize="16sp" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-    <TextView
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="头发丝"
+                android:textColor="@color/text"
+                android:textSize="21sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="AI 生成新发丝 · 端侧换发色"
+                android:textColor="@color/text_sub"
+                android:textSize="11.5sp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_pill"
+            android:paddingStart="10dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="5dp"
+            android:text="照片"
+            android:textColor="@color/brand"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 预览 -->
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="云端生成：把原图+描述发给图像大模型，生成飘逸发丝（需填硅基流动 Key）。端侧染发：离线换发色，零成本托底。"
-        android:textSize="12sp" />
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:layout_weight="1"
+        android:minHeight="150dp"
+        android:background="@drawable/bg_preview">
 
+        <ImageView
+            android:id="@+id/preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="预览"
+            android:scaleType="fitCenter" />
+
+        <LinearLayout
+            android:id="@+id/emptyState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="还没有选择照片"
+                android:textColor="@color/text_sub"
+                android:textSize="14sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="选一张人像，生成飘逸发丝"
+                android:textColor="@color/text_dim"
+                android:textSize="11.5sp" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/progress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:indeterminateTint="@color/brand"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <!-- 模式 -->
     <RadioGroup
         android:id="@+id/rgMode"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
         android:orientation="horizontal">
+
         <RadioButton
             android:id="@+id/rbCloud"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_segment"
+            android:button="@null"
+            android:checked="true"
+            android:gravity="center"
             android:text="云端生成"
-            android:checked="true" />
+            android:textColor="@color/segment_text"
+            android:textSize="13.5sp" />
+
         <RadioButton
             android:id="@+id/rbLocal"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="端侧染发" />
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_segment"
+            android:button="@null"
+            android:gravity="center"
+            android:text="端侧染发"
+            android:textColor="@color/segment_text"
+            android:textSize="13.5sp" />
     </RadioGroup>
 
-    <Button
+    <!-- 选图 -->
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/btnPick"
+        style="?attr/materialButtonOutlinedStyle"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="选择照片" />
+        android:layout_height="46dp"
+        android:layout_marginTop="10dp"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        android:text="选择照片"
+        android:textAllCaps="false"
+        android:textSize="14sp"
+        app:cornerRadius="14dp" />
 
+    <!-- 提示词 -->
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="发型描述(提示词)">
+        android:layout_marginTop="10dp"
+        android:hint="发型描述（提示词）"
+        app:boxBackgroundMode="outline"
+        app:boxCornerRadiusBottomEnd="12dp"
+        app:boxCornerRadiusBottomStart="12dp"
+        app:boxCornerRadiusTopEnd="12dp"
+        app:boxCornerRadiusTopStart="12dp"
+        app:hintTextColor="@color/text_sub">
+
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/etPrompt"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="flowing long wavy hair with wispy strands, silky, anime style" />
+            android:inputType="textMultiLine"
+            android:maxLines="2"
+            android:text="flowing long wavy hair with wispy strands, silky, anime style"
+            android:textSize="13sp" />
     </com.google.android.material.textfield.TextInputLayout>
 
-    <Button
-        android:id="@+id/btnGen"
+    <!-- 生成 / 保存 -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="生成头发丝"
-        android:enabled="false" />
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal">
 
-    <ProgressBar
-        android:id="@+id/progress"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:visibility="gone" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnGen"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:enabled="false"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="生成头发丝"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            app:cornerRadius="14dp" />
 
-    <ImageView
-        android:id="@+id/preview"
-        android:layout_width="match_parent"
-        android:layout_height="300dp"
-        android:scaleType="fitCenter"
-        android:background="#22000000" />
+        <Space
+            android:layout_width="10dp"
+            android:layout_height="1dp" />
 
-    <Button
-        android:id="@+id/btnSave"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="保存结果"
-        android:enabled="false" />
-
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSave"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:enabled="false"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="保存结果"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            app:cornerRadius="14dp" />
+    </LinearLayout>
 </LinearLayout>

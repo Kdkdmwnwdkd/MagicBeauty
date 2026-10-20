@@ -51,6 +51,7 @@ class HairFragment : Fragment() {
             sourceBitmap = bmp
             if (_binding != null) {
                 binding.preview.setImageBitmap(bmp)
+                binding.emptyState.visibility = View.GONE
                 binding.btnGen.isEnabled = true
             }
         }
@@ -95,6 +96,7 @@ class HairFragment : Fragment() {
                     resultBitmap = out
                     if (_binding != null) {
                         binding.preview.setImageBitmap(out)
+                        binding.emptyState.visibility = View.GONE
                         binding.btnSave.isEnabled = true
                     }
                     if (!usedMask) toast("未识别到头发，已退回整图调色")
@@ -124,6 +126,7 @@ class HairFragment : Fragment() {
                     resultBitmap = outBmp
                     if (_binding != null) {
                         binding.preview.setImageBitmap(outBmp)
+                        binding.emptyState.visibility = View.GONE
                         binding.btnSave.isEnabled = true
                     }
                 }

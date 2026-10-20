@@ -54,6 +54,14 @@ class LocalEditEngine {
         0f, 1f, 1f, 0f, 1f, 1f
     )
 
+    // 关键：glVertexAttribPointer 只接受 native order 的 direct Buffer。
+    // 用 FloatBuffer.wrap() 会抛 IllegalArgumentException("Must use a native order direct Buffer")，
+    // 之前正是这个异常被静默吞掉，导致预览一直空白。
+    private val quadPosBuf: FloatBuffer = ByteBuffer.allocateDirect(quadPos.size * 4)
+        .order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(quadPos); position(0) }
+    private val quadUVBuf: FloatBuffer = ByteBuffer.allocateDirect(quadUV.size * 4)
+        .order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(quadUV); position(0) }
+
     private fun initGL() {
         if (initialized) return
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
@@ -290,12 +298,12 @@ class LocalEditEngine {
     private fun bindQuad(prog: Int) {
         val pLoc = GLES20.glGetAttribLocation(prog, "aPos")
         val uvLoc = GLES20.glGetAttribLocation(prog, "aUV")
-        val pb = FloatBuffer.wrap(quadPos)
+        quadPosBuf.position(0)
         GLES20.glEnableVertexAttribArray(pLoc)
-        GLES20.glVertexAttribPointer(pLoc, 2, GLES20.GL_FLOAT, false, 0, pb)
-        val ub = FloatBuffer.wrap(quadUV)
+        GLES20.glVertexAttribPointer(pLoc, 2, GLES20.GL_FLOAT, false, 0, quadPosBuf)
+        quadUVBuf.position(0)
         GLES20.glEnableVertexAttribArray(uvLoc)
-        GLES20.glVertexAttribPointer(uvLoc, 2, GLES20.GL_FLOAT, false, 0, ub)
+        GLES20.glVertexAttribPointer(uvLoc, 2, GLES20.GL_FLOAT, false, 0, quadUVBuf)
     }
 
     private fun drawQuad() {
