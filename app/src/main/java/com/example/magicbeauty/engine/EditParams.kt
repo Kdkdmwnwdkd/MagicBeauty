@@ -16,6 +16,8 @@ data class EditParams(
     var vignette: Float = 0f,
     var whiten: Float = 0f,      // 美白（只提亮肤色区域）
     var filterId: Int = 0,       // 滤镜预设（见 Filters.presets）
+    /** 滤镜强度 0..1。专业工作流建议 60%~85%，全强度会压掉中间调对比度 */
+    var filterStrength: Float = 0.85f,
     // 调色进阶
     var sharpen: Float = 0f,     // 锐化 0..1（USM，边缘保持）
     var grain: Float = 0f,       // 颗粒 0..1（中间调最明显）

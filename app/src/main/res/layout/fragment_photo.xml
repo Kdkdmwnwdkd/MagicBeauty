@@ -353,6 +353,29 @@
                             android:orientation="horizontal" />
                     </HorizontalScrollView>
 
+                    <!-- 滤镜强度（专业工作流建议 60%~85%，全强度会压掉中间调对比度） -->
+                    <LinearLayout
+                        android:id="@+id/filterStrengthRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="34dp"
+                        android:layout_marginTop="4dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            style="@style/SliderLabel"
+                            android:text="强度" />
+
+                        <SeekBar
+                            android:id="@+id/sbFilterStrength"
+                            style="@style/AppSeekBar"
+                            android:layout_width="0dp"
+                            android:layout_height="30dp"
+                            android:layout_weight="1"
+                            android:max="100"
+                            android:progress="85" />
+                    </LinearLayout>
+
                     <!-- HSL 六色分频 -->
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -1073,6 +1096,114 @@
                                 android:layout_weight="1"
                                 android:max="100"
                                 android:progress="20" />
+                        </LinearLayout>
+
+                        <!-- 块大小档位（绝对像素，专业 App 用离散档位） -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                style="@style/SliderLabel"
+                                android:text="块大小" />
+
+                            <HorizontalScrollView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:scrollbars="none">
+
+                                <LinearLayout
+                                    android:id="@+id/mosaicBlockRow"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal" />
+                            </HorizontalScrollView>
+                        </LinearLayout>
+
+                        <!-- 马赛克样式 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:id="@+id/btnMosaicStylePixel"
+                                android:layout_width="wrap_content"
+                                android:layout_height="28dp"
+                                android:background="@drawable/bg_tab"
+                                android:gravity="center"
+                                android:paddingStart="12dp"
+                                android:paddingEnd="12dp"
+                                android:text="像素化"
+                                android:textColor="@color/tab_text"
+                                android:textSize="11.5sp" />
+
+                            <TextView
+                                android:id="@+id/btnMosaicStyleMosaic"
+                                android:layout_width="wrap_content"
+                                android:layout_height="28dp"
+                                android:layout_marginStart="8dp"
+                                android:background="@drawable/bg_tab"
+                                android:gravity="center"
+                                android:paddingStart="12dp"
+                                android:paddingEnd="12dp"
+                                android:text="马赛克"
+                                android:textColor="@color/tab_text"
+                                android:textSize="11.5sp" />
+
+                            <TextView
+                                android:id="@+id/btnMosaicStyleNoise"
+                                android:layout_width="wrap_content"
+                                android:layout_height="28dp"
+                                android:layout_marginStart="8dp"
+                                android:background="@drawable/bg_tab"
+                                android:gravity="center"
+                                android:paddingStart="12dp"
+                                android:paddingEnd="12dp"
+                                android:text="噪点"
+                                android:textColor="@color/tab_text"
+                                android:textSize="11.5sp" />
+
+                            <TextView
+                                android:id="@+id/btnMosaicAutoFace"
+                                android:layout_width="wrap_content"
+                                android:layout_height="28dp"
+                                android:layout_marginStart="8dp"
+                                android:background="@drawable/bg_tab"
+                                android:gravity="center"
+                                android:paddingStart="12dp"
+                                android:paddingEnd="12dp"
+                                android:text="人脸打码"
+                                android:textColor="@color/tab_text"
+                                android:textSize="11.5sp" />
+                        </LinearLayout>
+
+                        <!-- 边缘羽化 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="34dp"
+                            android:layout_marginTop="2dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                style="@style/SliderLabel"
+                                android:text="羽化" />
+
+                            <SeekBar
+                                android:id="@+id/sbMosaicFeather"
+                                style="@style/AppSeekBar"
+                                android:layout_width="0dp"
+                                android:layout_height="30dp"
+                                android:layout_weight="1"
+                                android:max="100"
+                                android:progress="30" />
                         </LinearLayout>
 
                         <LinearLayout

@@ -37,6 +37,9 @@ class LocalEditEngine {
     private var texCurve = 0
     private var curveRef: IntArray? = null
     private var curveVer = -1
+    // 3D LUT 纹理（2D strip 排布）：每个滤镜一张，切换时换
+    private var texLut = 0
+    private var lutFilterId = -1
     private var texA = 0   // warp 输出
     private var texB = 0   // adjust 输出
     private var texC = 0   // overlay 输出
@@ -57,6 +60,24 @@ class LocalEditEngine {
     private var targetsW = 0
     private var targetsH = 0
 
+    /**
+     * 「最终输出图像」的尺寸（像素）。
+     *
+     * 马赛克块大小、边框宽等参数以**输出像素**为语义锚点，
+     * 这样预览（缩略）与导出（原图）观感一致 —— 早期版本用「相对图像高度的比例」，
+     * 导出大图时块会被等比放大，用户看到的效果和预览完全不同。
+     */
+    var exportWidth = 0
+        private set
+    var exportHeight = 0
+        private set
+
+    /** 设置输出尺寸（导出目标）。传入 0 表示与当前渲染尺寸一致。 */
+    fun setExportSize(w: Int, h: Int) {
+        exportWidth = w.coerceAtLeast(0)
+        exportHeight = h.coerceAtLeast(0)
+    }
+
     // 复用缓冲：视频逐帧处理时避免每帧分配几十 MB（否则 GC 抖动会明显拖慢速度）
     private var flipBitmap: Bitmap? = null
     private var flipCanvas: Canvas? = null
@@ -69,6 +90,16 @@ class LocalEditEngine {
         -1f, -1f, 1f, -1f, -1f, 1f,
         -1f, 1f, 1f, -1f, 1f, 1f
     )
+
+    companion object {
+        /** 单位色彩矩阵（无 LUT 时的占位） */
+        private val IDENTITY_MATRIX = floatArrayOf(
+            1f, 0f, 0f,
+            0f, 1f, 0f,
+            0f, 0f, 1f
+        )
+        private val ZERO3 = floatArrayOf(0f, 0f, 0f)
+    }
     private val quadUV = floatArrayOf(
         0f, 0f, 1f, 0f, 0f, 1f,
         0f, 1f, 1f, 0f, 1f, 1f
@@ -128,6 +159,9 @@ class LocalEditEngine {
         }
         width = b.width
         height = b.height
+        // 默认输出尺寸 = 当前渲染尺寸（调用方可用 setExportSize 覆盖为原图尺寸）
+        if (exportWidth <= 0) exportWidth = b.width
+        if (exportHeight <= 0) exportHeight = b.height
         // GL 纹理原点在左下，上传前先垂直翻转，保证预览/输出方向正确
         // （复用同一张翻转位图；源图不透明且变换覆盖整幅，不必先清空）
         val flipped: Bitmap = if (flipBitmap?.width == b.width && flipBitmap?.height == b.height) {
@@ -303,9 +337,21 @@ class LocalEditEngine {
         }
         f(adjustProg, "uHasCurve", if (lut != null && lut.size >= 256 && texCurve != 0) 1f else 0f)
         bindTex(adjustProg, "uCurve", if (texCurve != 0) texCurve else texA, 3)
-        val preset = Filters.get(params.filterId)
-        mat3(adjustProg, "uFilterMat", preset.m)
-        vec3(adjustProg, "uFilterOff", preset.off)
+
+        // 3D LUT 滤镜：切换滤镜才换纹理，其余时候复用
+        val useLut = params.filterId != 0     // 0 = 原图，不需要 LUT
+        if (useLut && params.filterId != lutFilterId) {
+            texLut = uploadLut(Filters.lutFor(params.filterId), texLut)
+            lutFilterId = params.filterId
+        }
+        f(adjustProg, "uHasLut", if (useLut && texLut != 0) 1f else 0f)
+        f(adjustProg, "uLutSize", Lut.SIZE.toFloat())
+        f(adjustProg, "uLutStrength", params.filterStrength.coerceIn(0f, 1f))
+        // LUT 纹理走单元 4，避开拓单元 0 的 uTex / 3 的 uCurve
+        bindTex(adjustProg, "uLut", if (texLut != 0) texLut else texA, 4)
+        // 兼容路径（无 LUT 时用色彩矩阵；当前全部滤镜走 LUT，这里传单位阵占位）
+        mat3(adjustProg, "uFilterMat", IDENTITY_MATRIX)
+        vec3(adjustProg, "uFilterOff", ZERO3)
         drawQuad()
 
         // —— 段③：Overlay（贴纸/文字层 + 马赛克笔 + 边框）——
@@ -330,13 +376,49 @@ class LocalEditEngine {
         // 马赛克
         val mos = overlays.mosaic
         f(overlayProg, "uMosaicOn", if (mos.enabled) 1f else 0f)
-        f(overlayProg, "uMosaicBlock", mos.block.coerceIn(0.008f, 0.2f))
+        f(overlayProg, "uMosaicStyle", when (mos.style) {
+            MosaicStyle.PIXELATE -> 0f
+            MosaicStyle.MOSAIC -> 1f
+            MosaicStyle.NOISE -> 2f
+        })
         f(overlayProg, "uMosaicFull", if (mos.enabled && !mos.brushOnly) 1f else 0f)
+
+        // 块大小：语义是「最终输出图像的像素数」，这里按当前渲染分辨率折算成 UV。
+        // 预览与导出用同一个「输出像素」语义，所以观感一致；导出大图时块不会被放大。
+        val outW = exportWidth.coerceAtLeast(1)
+        val outH = exportHeight.coerceAtLeast(1)
+        val blockPx = mos.blockPx.coerceIn(2, 512)
+        f(overlayProg, "uMosaicBlock",
+            blockPx.toFloat() / outW.toFloat(),
+            blockPx.toFloat() / outH.toFloat())
+
+        // 遮罩：羽化宽度按遮罩自身的像素给。
+        // 注意必须用「遮罩位图的高度」而不是渲染高度：遮罩在导出时仍然是预览分辨率的位图，
+        // 用渲染高度会让导出时的羽化被放大好几倍（预览与导出对不上）。
         val mask = if (mos.enabled && mos.brushOnly) mos.mask else null
         if (mask != null && (mask !== mosaicRef || mos.maskVersion != mosaicVer)) {
             texMosaic = uploadMaskFlipped(mask, texMosaic)
             mosaicRef = mask
             mosaicVer = mos.maskVersion
+        }
+        val maskH = (mosaicRef?.height ?: height).coerceAtLeast(1).toFloat()
+        f(overlayProg, "uMaskTexel",
+            1f / (mosaicRef?.width ?: width).coerceAtLeast(1).toFloat(),
+            1f / maskH)
+        f(overlayProg, "uMaskFeatherPx", mos.feather * maskH)
+
+        // 人脸自动打码：只在检测到人脸时启用（没有脸就别乱套一个默认位置的圆）
+        val faceOn = mos.enabled && mos.autoFace && guide.hasFace
+        f(overlayProg, "uMosaicAutoFace", if (faceOn) 1f else 0f)
+        if (faceOn) {
+            // guide.faceCenter 已是 GL 坐标（y 向上）；半径按图像高度归一化，
+            // q 空间里 x 要乘宽高比，所以 x 半径用「半脸宽 * 高/宽」换算回同一尺度
+            val fh = guide.faceHalfH.coerceIn(0.02f, 0.6f)
+            f(overlayProg, "uFaceCenter", guide.faceCenter.x, guide.faceCenter.y)
+            f(overlayProg, "uFaceRadius",
+                (guide.faceHalfW * height.toFloat() / width.toFloat()).coerceAtLeast(0.01f),
+                fh)
+            f(overlayProg, "uFaceFeather", (mos.feather * 2f).coerceIn(0.01f, 0.5f))
         }
         bindTex(overlayProg, "uMosaicMask", if (texMosaic != 0) texMosaic else texB, 1)
 
@@ -380,6 +462,7 @@ class LocalEditEngine {
         if (texMask != 0) GLES20.glDeleteTextures(1, intArrayOf(texMask), 0)
         if (texDisp != 0) GLES20.glDeleteTextures(1, intArrayOf(texDisp), 0)
         if (texCurve != 0) GLES20.glDeleteTextures(1, intArrayOf(texCurve), 0)
+        if (texLut != 0) GLES20.glDeleteTextures(1, intArrayOf(texLut), 0)
         if (texA != 0) GLES20.glDeleteTextures(1, intArrayOf(texA), 0)
         if (texB != 0) GLES20.glDeleteTextures(1, intArrayOf(texB), 0)
         if (texC != 0) GLES20.glDeleteTextures(1, intArrayOf(texC), 0)
@@ -398,6 +481,7 @@ class LocalEditEngine {
         EGL14.eglTerminate(eglDisplay)
         initialized = false
         texSrc = 0; texA = 0; texB = 0; texC = 0; texMask = 0; texDisp = 0; texCurve = 0; texMosaic = 0
+        texLut = 0; lutFilterId = -1
         warpProg = 0; adjustProg = 0; overlayProg = 0
         maskRef = null; maskN = 0; maskOk = false; dispKey = ""
         curveRef = null; curveVer = -1
@@ -501,6 +585,40 @@ class LocalEditEngine {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        return tex[0]
+    }
+
+    /**
+     * 上传 3D LUT（2D strip 排布，RGBA）。
+     *
+     * 布局与 [Lut.buildStrip] 严格对应：宽 = N*N，高 = N；
+     * 第 t 个 B 切片占 x 区间 [t*N, (t+1)*N)，切片内 x=R 递增、y=G 递增。
+     *
+     * 注意 **Y 方向不能翻转**：strip 的 y=0 行就是 G=0 那一行，
+     * shader 里的 gy 公式直接按 0..1 取，与此一致。
+     * （.cube 外部文件按左上行序存储时才需要翻转，自建 strip 无此问题。）
+     */
+    private fun uploadLut(strip: ByteArray, reuse: Int): Int {
+        val n = Lut.SIZE
+        val w = n * n
+        val tex = IntArray(1)
+        if (reuse == 0) GLES20.glGenTextures(1, tex, 0) else tex[0] = reuse
+        // 切到单元 4：单元 0 是 uTex，3 是 uCurve
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE4)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        val buf = ByteBuffer.allocateDirect(strip.size).order(ByteOrder.nativeOrder())
+        buf.put(strip)
+        buf.position(0)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, n, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+        )
+        // LINEAR：R/G 轴靠硬件双线性插值；CLAMP 防止边缘越界
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         return tex[0]
     }
 

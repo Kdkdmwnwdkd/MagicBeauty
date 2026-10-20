@@ -24,6 +24,7 @@ import com.example.magicbeauty.engine.Filters
 import com.example.magicbeauty.engine.LocalEditEngine
 import com.example.magicbeauty.engine.MediaPipeHelper
 import com.example.magicbeauty.engine.MosaicSpec
+import com.example.magicbeauty.engine.MosaicStyle
 import com.example.magicbeauty.engine.OverlaySpec
 import com.example.magicbeauty.engine.StickerItem
 import com.example.magicbeauty.engine.WarpGuide
@@ -39,6 +40,34 @@ import kotlin.math.PI
 
 /** AI 消除「开始消除」按钮的 tag（用于去重查找） */
 private const val TAG_AI_ERASE_BTN = "mb_ai_erase_btn"
+
+/**
+ * 导出时的长边上限。
+ * GLES2 的纹理尺寸上限通常是 4096，超过会导致纹理创建失败。
+ */
+private const val EXPORT_MAX_DIM = 4096
+
+/**
+ * 源图解码上限（长边）。
+ *
+ * 源图保持高分辨率，预览与导出共用**同一张**图：
+ * - 预览时引擎内部缩到 1920 上传纹理；
+ * - 导出时直接用高分辨率原图重渲染。
+ *
+ * 这样裁剪/旋转天然被保留（都作用在同一张源图上），
+ * 也不会出现"导出跟预览不一样"的经典坑。
+ *
+ * 2560 是画质与内存的平衡点：一张 2560x1920 的 ARGB_8888 约 20MB，
+ * 加上引擎内部的翻转副本与读回缓冲，峰值约 60MB，低端机也不会 OOM。
+ */
+private const val SOURCE_MAX_DIM = 2560
+
+/**
+ * 预览渲染上限（长边）。
+ *
+ * 引擎只按这个尺寸上传纹理做预览，源图本身仍是 [SOURCE_MAX_DIM] 级别。
+ */
+private const val PREVIEW_MAX_DIM = 1920
 
 class PhotoEditorFragment : Fragment() {
 
@@ -65,6 +94,15 @@ class PhotoEditorFragment : Fragment() {
     private var guide: WarpGuide = WarpGuide()
     private var lastResult: Bitmap? = null
     private var renderJob: Job? = null
+
+    /**
+     * 原图 URI 与尺寸：保存时用它重新渲染，导出全分辨率（预览只是缩略图）
+     *
+     * 源图本身按 [SOURCE_MAX_DIM] 解码（不是 1920/2048 缩略图），
+     * 预览由引擎内部再缩放，所以裁剪/旋转/涂抹这些操作作用在**同一张高分辨率图**上，
+     * 导出时直接用这张图重渲染即可，用户的所有操作天然保留。
+     */
+    private var originalUri: Uri? = null
 
     /** 源图代数：替换/换图时 +1，异步分析回来只接受最新一代，丢弃过期结果 */
     private var sourceToken = 0
@@ -152,6 +190,12 @@ class PhotoEditorFragment : Fragment() {
 
         // 滤镜：分组（一级）+ 滤镜（二级），全部代码构建
         buildFilterGroups()
+
+        // 滤镜强度：0 = 原图，100% = 全强度。
+        // 专业工作流建议 60%~85%，全强度会压掉中间调对比度（这是"滤镜不好看"的通用解法）
+        binding.sbFilterStrength.setOnSeekBarChangeListener(slider {
+            params.filterStrength = it / 100f
+        })
 
         binding.sbThinFace.setOnSeekBarChangeListener(slider { params.thinFace = it / 100f })
         binding.sbEye.setOnSeekBarChangeListener(slider { params.eyeEnlarge = it / 100f * 0.35f })
@@ -374,6 +418,11 @@ class PhotoEditorFragment : Fragment() {
         binding.sbMosaicBrush.setOnSeekBarChangeListener(slider {
             binding.maskPaint.brush = 0.02f + it / 100f * 0.18f
         })
+        binding.sbMosaicFeather.setOnSeekBarChangeListener(slider {
+            mosaicSpec.feather = it / 100f * 0.06f
+        })
+        buildMosaicBlockChips()
+        buildMosaicStyleChips()
         binding.btnMosaicErase.setOnClickListener {
             binding.maskPaint.erasing = !binding.maskPaint.erasing
             binding.btnMosaicErase.isSelected = binding.maskPaint.erasing
@@ -818,7 +867,9 @@ class PhotoEditorFragment : Fragment() {
             try {
                 val pair = try {
                     withContext(glDispatcher) {
-                        val s = engine.setSource(newSrc, 1920)
+                        // 输出尺寸锚定随源图变化（裁剪/旋转后画面尺寸变了）
+                        engine.setExportSize(newSrc.width, newSrc.height)
+                        val s = engine.setSource(newSrc, PREVIEW_MAX_DIM)
                         val g = try { mp.analyze(s) } catch (_: Exception) { WarpGuide() }
                         s to g
                     }
@@ -829,14 +880,15 @@ class PhotoEditorFragment : Fragment() {
                     return@launch
                 }
                 if (token != sourceToken) return@launch   // 过期代：丢弃
-                sourceBitmap = pair.first
+                // 注意：sourceBitmap 保持**高分辨率**版本（newSrc），
+                // 引擎返回的只是 1920 预览缩略图，不能拿来当源图。
                 guide = pair.second
                 if (_binding == null) return@launch
                 // 浮层图像尺寸全部刷新：否则 contain 映射还是旧尺寸，选区/贴纸/定位线全错位
-                binding.maskPaint.setImageSize(pair.first.width, pair.first.height, clear = false)
-                binding.cropOverlay.setImageSize(pair.first.width, pair.first.height)
-                binding.stickerLayer.setImageSize(pair.first.width, pair.first.height)
-                binding.guideLines.setImageSize(pair.first.width, pair.first.height)
+                binding.maskPaint.setImageSize(newSrc.width, newSrc.height, clear = false)
+                binding.cropOverlay.setImageSize(newSrc.width, newSrc.height)
+                binding.stickerLayer.setImageSize(newSrc.width, newSrc.height)
+                binding.guideLines.setImageSize(newSrc.width, newSrc.height)
                 updateDetectHint()
                 renderPreview()
             } finally {
@@ -995,7 +1047,6 @@ class PhotoEditorFragment : Fragment() {
         }
         refreshFilterChips()
     }
-
     private fun refreshFilterChips() {
         val row = binding.filterRow
         val group = Filters.groups.firstOrNull { it.name == filterGroup } ?: return
@@ -1007,6 +1058,78 @@ class PhotoEditorFragment : Fragment() {
                 if (selected) 0xFF0E0F18.toInt() else resources.getColor(R.color.tab_text, null)
             )
         }
+    }
+
+    /**
+     * 构建马赛克「块大小」档位 chips。
+     *
+     * 用离散档位（4/8/12/16/24/32/48/64/96 像素）而不是连续滑杆：
+     * 1) 语义锚定在**输出像素**上，导出大图时块不会被放大；
+     * 2) 专业 App（Photoshop/醒图）都用离散档位，用户有明确预期。
+     */
+    private fun buildMosaicBlockChips() {
+        val row = binding.mosaicBlockRow
+        row.removeAllViews()
+        MosaicSpec.BLOCK_STEPS.forEach { px ->
+            val chip = LayoutInflater.from(requireContext())
+                .inflate(R.layout.view_filter_chip, row, false) as TextView
+            chip.text = "${px}px"
+            chip.setOnClickListener {
+                mosaicSpec.blockPx = px
+                refreshMosaicBlockChips()
+                if (sourceBitmap != null) renderPreview()
+            }
+            row.addView(chip)
+        }
+        refreshMosaicBlockChips()
+    }
+
+    private fun refreshMosaicBlockChips() {
+        val row = binding.mosaicBlockRow
+        for (i in 0 until row.childCount) {
+            val c = row.getChildAt(i) as? TextView ?: continue
+            val px = MosaicSpec.BLOCK_STEPS.getOrNull(i) ?: continue
+            val selected = px == mosaicSpec.blockPx
+            c.isSelected = selected
+            c.setTextColor(
+                if (selected) 0xFF0E0F18.toInt() else resources.getColor(R.color.tab_text, null)
+            )
+        }
+    }
+
+    /** 马赛克样式切换（像素化 / 马赛克 / 噪点）+ 人脸自动打码开关 */
+    private fun buildMosaicStyleChips() {
+        binding.btnMosaicStylePixel.setOnClickListener { setMosaicStyle(MosaicStyle.PIXELATE) }
+        binding.btnMosaicStyleMosaic.setOnClickListener { setMosaicStyle(MosaicStyle.MOSAIC) }
+        binding.btnMosaicStyleNoise.setOnClickListener { setMosaicStyle(MosaicStyle.NOISE) }
+        binding.btnMosaicAutoFace.setOnClickListener {
+            mosaicSpec.autoFace = !mosaicSpec.autoFace
+            refreshMosaicStyleChips()
+            if (mosaicSpec.autoFace && !guide.hasFace) {
+                toast("没检测到人脸，无法自动打码")
+            }
+            if (sourceBitmap != null) renderPreview()
+        }
+        refreshMosaicStyleChips()
+    }
+
+    private fun setMosaicStyle(s: MosaicStyle) {
+        mosaicSpec.style = s
+        refreshMosaicStyleChips()
+        if (sourceBitmap != null) renderPreview()
+    }
+
+    private fun refreshMosaicStyleChips() {
+        binding.btnMosaicStylePixel.isSelected = mosaicSpec.style == MosaicStyle.PIXELATE
+        binding.btnMosaicStyleMosaic.isSelected = mosaicSpec.style == MosaicStyle.MOSAIC
+        binding.btnMosaicStyleNoise.isSelected = mosaicSpec.style == MosaicStyle.NOISE
+        binding.btnMosaicAutoFace.isSelected = mosaicSpec.autoFace
+        val on = 0xFF0E0F18.toInt()
+        val off = resources.getColor(R.color.tab_text, null)
+        binding.btnMosaicStylePixel.setTextColor(if (mosaicSpec.style == MosaicStyle.PIXELATE) on else off)
+        binding.btnMosaicStyleMosaic.setTextColor(if (mosaicSpec.style == MosaicStyle.MOSAIC) on else off)
+        binding.btnMosaicStyleNoise.setTextColor(if (mosaicSpec.style == MosaicStyle.NOISE) on else off)
+        binding.btnMosaicAutoFace.setTextColor(if (mosaicSpec.autoFace) on else off)
     }
 
     // ---------- HSL 六色分频 ----------
@@ -1196,14 +1319,23 @@ class PhotoEditorFragment : Fragment() {
             if (_binding != null) binding.progress.visibility = View.VISIBLE
             try {
             // 解码放到 IO 线程（旧版没有采样，大图会 OOM；也没有处理 EXIF 旋转）
-            val bmp = withContext(Dispatchers.IO) { BitmapUtils.decodeSampled(ctx, uri, 2048) }
+            //
+            // 关键：这里按 SOURCE_MAX_DIM（2560）解码，而不是缩略图尺寸。
+            // 源图保持高分辨率，裁剪/旋转/涂抹全部作用在它身上，
+            // 导出时直接用这张图重渲染 —— 用户的操作天然保留，
+            // 不会出现"预览裁了、导出没裁"的经典坑。
+            val bmp = withContext(Dispatchers.IO) { BitmapUtils.decodeSampled(ctx, uri, SOURCE_MAX_DIM) }
             if (bmp == null) {
                 toast("图片读取失败")
                 return@launch
             }
             val pair = try {
                 withContext(glDispatcher) {
-                    val src = engine.setSource(bmp, 1920)
+                    // 引擎内部按 1920 缩放上传纹理做预览；
+                    // 但输出尺寸锚定在源图（2560 级别）上，保证马赛克块等
+                    // 以「最终导出像素」为语义单位，预览与导出一致。
+                    engine.setExportSize(bmp.width, bmp.height)
+                    val src = engine.setSource(bmp, PREVIEW_MAX_DIM)
                     val g = try { mp.analyze(src) } catch (_: Exception) { WarpGuide() }
                     src to g
                 }
@@ -1212,8 +1344,12 @@ class PhotoEditorFragment : Fragment() {
                 return@launch
             }
             if (token != sourceToken) return@launch   // 期间又选了别的图：丢弃旧结果
-            sourceBitmap = pair.first
+            // 注意：这里保留**高分辨率源图**（bmp），而不是引擎返回的 1920 缩略图。
+            // 裁剪/旋转/涂抹都要作用在高分辨率图上，导出才有画质。
+            sourceBitmap = bmp
             guide = pair.second
+            // 记住原图 URI：导出失败时可退回保存预览图
+            originalUri = uri
             if (_binding == null) return@launch
             binding.btnSave.isEnabled = true
             // 换图：全部状态重置（旧代码漏了一大批，导致工具面板/定位线/涂抹残留在新图上）
@@ -1245,11 +1381,12 @@ class PhotoEditorFragment : Fragment() {
             binding.btnMosaicErase.isSelected = false
             binding.btnMosaicErase.text = "涂抹"
             // setImageSize(clear=true)：同尺寸也清掉旧涂抹
-            binding.maskPaint.setImageSize(pair.first.width, pair.first.height, clear = true)
-            binding.cropOverlay.setImageSize(pair.first.width, pair.first.height)
+            // 用**高分辨率源图**的尺寸（浮层与源图同坐标系，涂抹/裁剪才对得齐）
+            binding.maskPaint.setImageSize(bmp.width, bmp.height, clear = true)
+            binding.cropOverlay.setImageSize(bmp.width, bmp.height)
             binding.cropOverlay.reset()
-            binding.stickerLayer.setImageSize(pair.first.width, pair.first.height)
-            binding.guideLines.setImageSize(pair.first.width, pair.first.height)
+            binding.stickerLayer.setImageSize(bmp.width, bmp.height)
+            binding.guideLines.setImageSize(bmp.width, bmp.height)
             manualHemY = null
             manualAnkleY = null
             renderErrorShown = false
@@ -1355,16 +1492,88 @@ class PhotoEditorFragment : Fragment() {
             toast("正在处理，马上保存")
             return
         }
-        val bmp = lastResult ?: run {
+        val ctx = context ?: return
+        val src = sourceBitmap
+        if (src == null) {
             toast("还没有可保存的结果")
             return
         }
-        val ctx = context ?: return
-        // 写相册是 IO 操作，不要放主线程（大图会卡顿）
         lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) { SaveUtils.saveBitmap(ctx, bmp) }
-            toast(if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）")
+            binding.progress.visibility = View.VISIBLE
+            try {
+                // 导出全分辨率：用高分辨率源图重新渲染一遍。
+                // 旧版直接保存预览图（1920 长边），导出画质被砍掉一大截 —— 这是"效果差"的独立原因。
+                val out = renderFullResolution() ?: lastResult
+                if (out == null) {
+                    toast("还没有可保存的结果")
+                    return@launch
+                }
+                val ok = withContext(Dispatchers.IO) { SaveUtils.saveBitmap(ctx, out) }
+                toast(if (ok) "已保存到相册/MagicBeauty" else "保存失败（请检查存储权限）")
+            } catch (e: Exception) {
+                android.util.Log.e("MagicBeauty", "export failed", e)
+                // 全分辨率导出失败时退回保存预览图，别让用户白等
+                val fallback = lastResult
+                if (fallback != null) {
+                    val ok = withContext(Dispatchers.IO) { SaveUtils.saveBitmap(ctx, fallback) }
+                    toast(if (ok) "已保存（预览分辨率）" else "保存失败（请检查存储权限）")
+                } else {
+                    toast("导出失败：${e.message}")
+                }
+            } finally {
+                if (_binding != null) binding.progress.visibility = View.GONE
+            }
         }
+    }
+
+    /**
+     * 用**高分辨率源图**（而非预览缩略图）重新渲染一遍，导出全分辨率。
+     *
+     * 关键点：
+     * 1. 源图本身就是高分辨率的（[SOURCE_MAX_DIM]），裁剪/旋转/涂抹都作用在它身上，
+     *    所以这里直接用 sourceBitmap，不需要再从 URI 解码 ——
+     *    用户的所有几何操作天然保留，不会出现"预览裁了、导出没裁"；
+     * 2. 渲染前把引擎的 export 尺寸设成源图尺寸 —— 马赛克块等参数的语义锚定在输出像素上，
+     *    这样导出的绝对块尺寸与用户设定一致，且与预览同一相对比例；
+     * 3. 渲染完必须把引擎切回预览源，否则后续预览会用错尺寸。
+     */
+    private suspend fun renderFullResolution(): Bitmap? {
+        val full = sourceBitmap ?: return null
+        val (ow, oh) = full.width to full.height
+        return withContext(glDispatcher) {
+            try {
+                engine.setExportSize(ow, oh)
+                engine.setSource(full, EXPORT_MAX_DIM)
+                val out = engine.render(effectiveParams(), guide, currentOverlays())
+                // 切回预览源（尺寸会变，引擎内部会重建 FBO）
+                engine.setExportSize(ow, oh)
+                engine.setSource(full, PREVIEW_MAX_DIM)
+                out
+            } catch (e: Exception) {
+                android.util.Log.e("MagicBeauty", "full-res render failed", e)
+                null
+            }
+        }
+    }
+
+    /** 把 params 里的形变强度按引导可用性门控（与 renderPreview 一致） */
+    private fun effectiveParams(): EditParams {
+        val g = if (manualHemY != null || manualAnkleY != null) {
+            guide.copy(manualHemY = manualHemY, manualAnkleY = manualAnkleY)
+        } else guide
+        return params.copy(
+            thinFace = if (g.hasFace) params.thinFace else 0f,
+            eyeEnlarge = if (g.hasFace) params.eyeEnlarge else 0f,
+            waistSlim = if (g.waistOk) params.waistSlim else 0f,
+            legStretch = if (g.legOk) params.legStretch else 0f,
+            noseSlim = if (g.faceFeatureOk) params.noseSlim else 0f,
+            mouthSlim = if (g.faceFeatureOk) params.mouthSlim else 0f,
+            chinSlim = if (g.faceFeatureOk) params.chinSlim else 0f,
+            shoulderSlim = if (g.shoulderOk) params.shoulderSlim else 0f,
+            armSlim = if (g.armOk) params.armSlim else 0f,
+            hipSlim = if (g.hipOk) params.hipSlim else 0f,
+            legSlim = if (g.legSlimOk) params.legSlim else 0f
+        )
     }
 
     private fun toast(msg: String) {

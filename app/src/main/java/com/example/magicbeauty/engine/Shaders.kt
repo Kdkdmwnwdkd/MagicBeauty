@@ -26,8 +26,12 @@ object Shaders {
 
     // ---- ① 形变段 ----
     const val WARP_FRAG = """
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        precision highp float;
+        #else
         precision mediump float;
-        varying vec2 vUV;
+        #endif
+        varying highp vec2 vUV;
         uniform sampler2D uTex;
 
         // uv 是按宽、高各自归一化的，直接算距离会被画面比例拉扁；
@@ -171,8 +175,12 @@ object Shaders {
 
     // ---- ② 调色 + 磨皮 + 滤镜 ----
     const val ADJUST_FRAG = """
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        precision highp float;
+        #else
         precision mediump float;
-        varying vec2 vUV;
+        #endif
+        varying highp vec2 vUV;
         uniform sampler2D uTex;
         uniform vec2  uTexel;        // 1.0/分辨率
         uniform float uBrightness;   // -0.3..0.3
@@ -199,6 +207,11 @@ object Shaders {
 
         uniform mat3  uFilterMat;    // 滤镜色彩矩阵（行主序传入）
         uniform vec3  uFilterOff;    // 滤镜偏移
+        // 3D LUT（2D strip 排布，B 轴手工插值）
+        uniform sampler2D uLut;
+        uniform float uHasLut;
+        uniform float uLutSize;      // LUT 边长 N
+        uniform float uLutStrength;  // 0..1 强度
 
         float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
 
@@ -258,6 +271,32 @@ object Shaders {
         // 稳定 hash 噪声（颗粒用，不随时间变化，保证预览/保存一致）
         float hash(vec2 p) {
             return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+        }
+
+        // 3D LUT 采样（2D strip 排布）。
+        //
+        // 布局：第 t 个 B 切片占 x 区间 [t*N, (t+1)*N)，切片内 x=R 递增、y=G 递增。
+        // 坐标修正用 GPU Gems 2 Ch.24 的公式 (N-1)/N * coord + 0.5/N，
+        // 否则硬件采样会在数据边缘引入非线性误差（小尺寸 LUT 上视觉显著）。
+        //
+        // B 轴：两次采样 + mix（硬件双线性只在 2D 平面内插值）
+        // R/G 轴：由硬件 GL_LINEAR 双线性完成 —— 合起来即三线性插值
+        vec3 lutLookup(vec3 c) {
+            float n = uLutSize;
+            float texW = n * n;
+            // 修正后的 R/G 在片内的纹素坐标
+            float rx = (c.r * (n - 1.0) + 0.5) / n;
+            float gy = (c.g * (n - 1.0) + 0.5) / n;
+            // B 轴索引：必须 clamp，否则 ceil 越界会采到纹理外的边缘像素 -> 高光偏色
+            float bIdx = clamp(c.b, 0.0, 1.0) * (n - 1.0);
+            float t0 = floor(bIdx);
+            float t1 = min(t0 + 1.0, n - 1.0);
+            float bf = fract(bIdx);
+            vec2 p0 = vec2((t0 * n + rx * n) / texW, gy);
+            vec2 p1 = vec2((t1 * n + rx * n) / texW, gy);
+            vec3 c0 = texture2D(uLut, p0).rgb;
+            vec3 c1 = texture2D(uLut, p1).rgb;
+            return mix(c0, c1, bf);
         }
 
         void main() {
@@ -356,8 +395,14 @@ object Shaders {
                 col.b = texture2D(uCurve, vec2(clamp(col.b, 0.0, 1.0), 0.5)).b;
             }
 
-            // 滤镜（色彩矩阵 + 偏移）
-            col = clamp(uFilterMat * col + uFilterOff, 0.0, 1.0);
+            // 滤镜：优先用 3D LUT（能表达分离色调/交叉通道），没有 LUT 时退回色彩矩阵
+            if (uHasLut > 0.5) {
+                vec3 lutCol = lutLookup(clamp(col, 0.0, 1.0));
+                // 强度混合在 sRGB 域做（感知均匀），专业工作流建议 60%~85%
+                col = mix(col, lutCol, clamp(uLutStrength, 0.0, 1.0));
+            } else {
+                col = clamp(uFilterMat * col + uFilterOff, 0.0, 1.0);
+            }
 
             // ---------- 颗粒：中间调最明显的细噪点 ----------
             if (uGrain > 0.001) {
@@ -380,30 +425,98 @@ object Shaders {
     // ---- ③ 叠加段：贴纸/文字层 + 马赛克笔涂抹 ----
     // 在 Adjust 之后按屏幕空间混合。贴纸层最多 4 层（数组下标是 for 循环常数，GLES2 合法）。
     const val OVERLAY_FRAG = """
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        precision highp float;
+        #else
         precision mediump float;
-        varying vec2 vUV;
+        #endif
+        varying highp vec2 vUV;
         uniform sampler2D uBase;        // Adjust 输出
         uniform float uAspectB;         // 宽高比（>=1）
         uniform float uLayerCount;
         uniform sampler2D uLayers[4];   // 贴纸/文字位图（RGBA）
         uniform vec4  uLayerT[4];       // cx, cy, scale, rotation（cx/cy 为 y 向下的图像坐标）
         uniform float uMosaicOn;
-        uniform float uMosaicBlock;
+        // 块大小（UV 空间）：由 CPU 按「输出像素」换算好传进来
+        uniform vec2  uMosaicBlock;
+        uniform float uMosaicStyle;   // 0=像素化(平均) 1=马赛克(单点) 2=彩色噪点
         uniform float uMosaicFull;    // 1 = 整图生效（忽略 mask）
         uniform sampler2D uMosaicMask;  // 白色 = 涂抹区
+        uniform vec2  uMaskTexel;     // 1/遮罩分辨率（像素单位）
+        uniform float uMaskFeatherPx; // 遮罩羽化宽度（遮罩像素）
+        // 人脸自动打码（圆形羽化遮罩）
+        uniform float uMosaicAutoFace;
+        uniform vec2  uFaceCenter;     // 人脸中心（GL 坐标，y 向上）
+        uniform vec2  uFaceRadius;     // 人脸半径（q 空间，1.0 = 图像高度）
+        uniform float uFaceFeather;    // 圆形遮罩边缘柔和度（0..0.5 归一化）
         uniform float uBorderW;         // 边框宽（相对图像高度，0 = 无边框）
         uniform vec3  uBorderCol;       // 边框颜色
+
+        // 稳定 hash（噪点马赛克用）
+        float hash21(vec2 p) {
+            return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453);
+        }
+
+        // 遮罩采样 + 5 tap 羽化：边缘不再硬切，比硬边更像真实打码
+        float maskAt(vec2 uv) {
+            float m = texture2D(uMosaicMask, uv).r;
+            if (uMaskFeatherPx > 0.5) {
+                vec2 t = uMaskTexel * uMaskFeatherPx;
+                m += texture2D(uMosaicMask, uv + vec2(t.x, 0.0)).r * 0.16;
+                m += texture2D(uMosaicMask, uv - vec2(t.x, 0.0)).r * 0.16;
+                m += texture2D(uMosaicMask, uv + vec2(0.0, t.y)).r * 0.16;
+                m += texture2D(uMosaicMask, uv - vec2(0.0, t.y)).r * 0.16;
+            }
+            return clamp(m, 0.0, 1.0);
+        }
 
         void main() {
             vec2 uv = vUV;
             vec3 col = texture2D(uBase, uv).rgb;
 
-            // ---------- 马赛克：块中心采样 + mask 混合 ----------
+            // ---------- 马赛克 ----------
             if (uMosaicOn > 0.5) {
-                float m = uMosaicFull > 0.5 ? 1.0 : texture2D(uMosaicMask, uv).r;
-                vec2 block = vec2(uMosaicBlock * uAspectB, uMosaicBlock);
-                vec2 mv = (floor(uv / block) + 0.5) * block;
-                col = mix(col, texture2D(uBase, mv).rgb, clamp(m, 0.0, 1.0));
+                // 遮罩强度：整图=1，否则取涂抹区（带羽化）
+                float m = uMosaicFull > 0.5 ? 1.0 : maskAt(uv);
+
+                // 人脸自动打码：椭圆区域，圆角羽化边
+                if (uMosaicAutoFace > 0.5) {
+                    // q 空间：x 乘宽高比，保证在非正方形图上仍是正圆
+                    vec2 q = (uv - uFaceCenter) * vec2(uAspectB, 1.0);
+                    float e = length(q / max(uFaceRadius, vec2(0.0001)));
+                    // smoothstep 的 edge0 必须小于 edge1，否则除零
+                    float fe = max(uFaceFeather, 0.001);
+                    float fm = 1.0 - smoothstep(1.0 - fe, 1.0 + fe, e);
+                    m = max(m, fm);
+                }
+
+                if (m > 0.001) {
+                    // 量化到块中心。uMosaicBlock 已按「输出像素」折算成 UV 尺寸，
+                    // 因此预览与导出观感一致，导出大图时块不会被放大
+                    vec2 block = max(uMosaicBlock, vec2(0.0005));
+                    vec2 bc = (floor(uv / block) + 0.5) * block;
+
+                    vec3 mc;
+                    if (uMosaicStyle < 0.5) {
+                        // 像素化：块内 4 点平均，得到真正的"色块"，
+                        // 块内不再残留原图细节（单点采样会泄露五官轮廓）
+                        vec2 o = block * 0.25;
+                        mc = (texture2D(uBase, bc + vec2( o.x,  o.y)).rgb +
+                              texture2D(uBase, bc + vec2(-o.x,  o.y)).rgb +
+                              texture2D(uBase, bc + vec2( o.x, -o.y)).rgb +
+                              texture2D(uBase, bc + vec2(-o.x, -o.y)).rgb) * 0.25;
+                    } else if (uMosaicStyle < 1.5) {
+                        // 经典马赛克：块内单点采样，块间硬跳变
+                        mc = texture2D(uBase, bc).rgb;
+                    } else {
+                        // 彩色噪点：块内换成噪声色，原图信息完全不可还原（隐私打码）
+                        float n1 = hash21(floor(uv / block));
+                        float n2 = hash21(floor(uv / block) + 17.3);
+                        float n3 = hash21(floor(uv / block) + 41.7);
+                        mc = vec3(n1, n2, n3);
+                    }
+                    col = mix(col, mc, clamp(m, 0.0, 1.0));
+                }
             }
 
             // ---------- 边框：q 空间（y 满幅=1）四条边带 ----------
