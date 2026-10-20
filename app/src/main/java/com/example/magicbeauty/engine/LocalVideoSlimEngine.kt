@@ -155,11 +155,22 @@ class LocalVideoSlimEngine(private val context: Context) {
                 }
             }
 
-            // ByteBuffer 输入的编码器：必须自己塞 EOS
+            // ByteBuffer 输入的编码器：必须自己塞 EOS。
+            // 注意：dequeueInputBuffer 可能因输入队列满返回 -1，不能只试一次，
+            // 否则 EOS 永远入不了队，后面的 drain 会一直等下去（卡死）。
             encoder?.let { enc ->
-                val eosIdx = enc.dequeueInputBuffer(10_000)
-                if (eosIdx >= 0) {
-                    enc.queueInputBuffer(eosIdx, 0, 0, lastPts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                var queued = false
+                var tries = 0
+                while (!queued && tries < 50) {
+                    val eosIdx = enc.dequeueInputBuffer(10_000)
+                    if (eosIdx >= 0) {
+                        enc.queueInputBuffer(eosIdx, 0, 0, lastPts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        queued = true
+                    } else {
+                        // 先排空输出，给输入队列腾位置，再重试
+                        drainEncoder(enc, eInfo, muxer, state, untilEos = false)
+                        tries++
+                    }
                 }
                 drainEncoder(enc, eInfo, muxer, state, untilEos = true)
             }
@@ -179,7 +190,14 @@ class LocalVideoSlimEngine(private val context: Context) {
             try { mp.close() } catch (_: Exception) {}
             try { engine.release() } catch (_: Exception) {}
             try { audioSource?.extractor?.release() } catch (_: Exception) {}
-            if (state.started) try { muxer.stop() } catch (_: Exception) {}
+            if (state.started) {
+                try {
+                    muxer.stop()
+                } catch (_: Exception) {
+                    // stop 失败说明封装不完整，删掉半成品，避免用户拿到损坏视频
+                    try { outputFile.delete() } catch (_: Exception) {}
+                }
+            }
             try { muxer.release() } catch (_: Exception) {}
         }
 
@@ -233,12 +251,15 @@ class LocalVideoSlimEngine(private val context: Context) {
         state: MuxerState,
         untilEos: Boolean
     ) {
+        var idle = 0
         while (true) {
             val outIdx = encoder.dequeueOutputBuffer(info, 10_000)
             when {
                 outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
                     if (!untilEos) return
-                    // 等待 EOS 时继续轮询
+                    // 等 EOS 时加个上限（约 2 秒），避免异常情况下无限轮询
+                    idle++
+                    if (idle > 200) return
                 }
                 outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     if (!state.started) {
@@ -248,10 +269,10 @@ class LocalVideoSlimEngine(private val context: Context) {
                     }
                 }
                 outIdx >= 0 -> {
+                    idle = 0
                     val buf = encoder.getOutputBuffer(outIdx)
                     if (buf != null && info.size > 0 && state.started) {
-                        buf.position(info.offset)
-                        buf.limit(info.offset + info.size)
+                        // 不要手动改 position/limit：MediaMuxer 会按 BufferInfo.offset 自己定位
                         muxer.writeSampleData(state.videoTrack, buf, info)
                     }
                     encoder.releaseOutputBuffer(outIdx, false)
@@ -335,15 +356,16 @@ class LocalVideoSlimEngine(private val context: Context) {
                 val bb = p and 0xff
                 val y = (((66 * rr + 129 * gg + 25 * bb + 128) shr 8) + 16).coerceIn(0, 255)
                 val yIdx = r * ys + c * yp
-                if (yIdx < yB.capacity()) yB.put(yIdx, y.toByte())
+                // 注意用 limit() 而不是 capacity()：绝对位置写入超出 limit 会抛异常
+                if (yIdx < yB.limit()) yB.put(yIdx, y.toByte())
 
                 if ((r and 1) == 0 && (c and 1) == 0) {
                     val u = (((-38 * rr - 74 * gg + 112 * bb + 128) shr 8) + 128).coerceIn(0, 255)
                     val v = (((112 * rr - 94 * gg - 18 * bb + 128) shr 8) + 128).coerceIn(0, 255)
                     val uIdx = (r / 2) * us + (c / 2) * up
                     val vIdx = (r / 2) * vs + (c / 2) * vp
-                    if (uIdx < uB.capacity()) uB.put(uIdx, u.toByte())
-                    if (vIdx < vB.capacity()) vB.put(vIdx, v.toByte())
+                    if (uIdx < uB.limit()) uB.put(uIdx, u.toByte())
+                    if (vIdx < vB.limit()) vB.put(vIdx, v.toByte())
                 }
             }
         }

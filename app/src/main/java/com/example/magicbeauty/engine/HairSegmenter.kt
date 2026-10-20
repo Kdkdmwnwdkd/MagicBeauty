@@ -45,44 +45,49 @@ class HairSegmenter(context: Context) {
     fun hairMask(bitmap: Bitmap): ByteArray? {
         return try {
             val mpImage = BitmapImageBuilder(bitmap).build()
-            val result = segmenter.segment(mpImage)
-            val maskImage = result.categoryMask().orElse(null) ?: return null
+            try {
+                val result = segmenter.segment(mpImage)
+                val maskImage = result.categoryMask().orElse(null) ?: return null
 
-            val mw = maskImage.width
-            val mh = maskImage.height
-            if (mw <= 0 || mh <= 0) return null
+                val mw = maskImage.width
+                val mh = maskImage.height
+                if (mw <= 0 || mh <= 0) return null
 
-            val raw = ByteBufferExtractor.extract(maskImage)
-            raw.rewind()
-            val bytes = ByteArray(raw.remaining())
-            raw.get(bytes)
+                val raw = ByteBufferExtractor.extract(maskImage)
+                raw.rewind()
+                val bytes = ByteArray(raw.remaining())
+                raw.get(bytes)
 
-            val total = mw * mh
-            // 类别掩码通常是 1 字节/像素；少数实现会给 RGBA，这里按通道数自适应
-            if (total <= 0 || bytes.size % total != 0) return null
-            val channels = bytes.size / total
-            if (channels !in 1..4) return null
+                val total = mw * mh
+                // 类别掩码通常是 1 字节/像素；少数实现会给 RGBA，这里按通道数自适应
+                if (total <= 0 || bytes.size % total != 0) return null
+                val channels = bytes.size / total
+                if (channels !in 1..4) return null
 
-            val bw = bitmap.width
-            val bh = bitmap.height
-            val out = ByteArray(bw * bh)
-            var hits = 0
+                val bw = bitmap.width
+                val bh = bitmap.height
+                val out = ByteArray(bw * bh)
+                var hits = 0
 
-            // 最近邻缩放到原图尺寸（掩码后面还会做 3x3 羽化，硬边没关系）
-            for (y in 0 until bh) {
-                val sy = y * mh / bh
-                val rowBase = sy * mw
-                val dstBase = y * bw
-                for (x in 0 until bw) {
-                    val sx = x * mw / bw
-                    val idx = bytes[(rowBase + sx) * channels].toInt() and 0xff
-                    if (idx == HAIR_CLASS) {
-                        out[dstBase + x] = 255.toByte()
-                        hits++
+                // 最近邻缩放到原图尺寸（掩码后面还会做 3x3 羽化，硬边没关系）
+                for (y in 0 until bh) {
+                    val sy = y * mh / bh
+                    val rowBase = sy * mw
+                    val dstBase = y * bw
+                    for (x in 0 until bw) {
+                        val sx = x * mw / bw
+                        val idx = bytes[(rowBase + sx) * channels].toInt() and 0xff
+                        if (idx == HAIR_CLASS) {
+                            out[dstBase + x] = 255.toByte()
+                            hits++
+                        }
                     }
                 }
+                if (hits == 0) null else out
+            } finally {
+                // 输入图像持有 native 资源，用完必须关掉
+                try { mpImage.close() } catch (_: Exception) {}
             }
-            if (hits == 0) null else out
         } catch (_: Throwable) {
             null
         }

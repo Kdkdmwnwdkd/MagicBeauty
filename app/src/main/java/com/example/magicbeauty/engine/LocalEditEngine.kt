@@ -50,7 +50,9 @@ class LocalEditEngine {
         if (initialized) return
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
         check(eglDisplay != EGL14.EGL_NO_DISPLAY) { "无法获取 EGL Display" }
-        EGL14.eglInitialize(eglDisplay, null, 0, null, 0)
+        // 不要传 null：部分 ROM 的实现会在这里 NPE，传真实数组最稳
+        val version = IntArray(2)
+        check(EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) { "EGL 初始化失败" }
 
         val attribs = intArrayOf(
             EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
@@ -62,6 +64,7 @@ class LocalEditEngine {
         val configs = arrayOfNulls<android.opengl.EGLConfig>(1)
         val num = IntArray(1)
         EGL14.eglChooseConfig(eglDisplay, attribs, 0, configs, 0, 1, num, 0)
+        check(num[0] > 0 && configs[0] != null) { "找不到可用的 EGL 配置" }
         val cfg = configs[0]!!
         val ctxAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
         eglContext = EGL14.eglCreateContext(eglDisplay, cfg, EGL14.EGL_NO_CONTEXT, ctxAttribs, 0)

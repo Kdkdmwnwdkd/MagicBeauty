@@ -53,12 +53,14 @@ object BitmapUtils {
         val longer = maxOf(oriented.width, oriented.height)
         return if (longer > maxDim) {
             val s = maxDim.toFloat() / longer
-            Bitmap.createScaledBitmap(
+            val scaled = Bitmap.createScaledBitmap(
                 oriented,
                 (oriented.width * s).toInt().coerceAtLeast(1),
                 (oriented.height * s).toInt().coerceAtLeast(1),
                 true
             )
+            if (scaled !== oriented) oriented.recycle()
+            scaled
         } else oriented
     }
 

@@ -43,13 +43,19 @@ class MainActivity : AppCompatActivity() {
             selectTabSilently(R.id.nav_photo)
         } else {
             current = supportFragmentManager.fragments.firstOrNull { !it.isHidden }
-            val id = when (current) {
-                is VideoSlimFragment -> R.id.nav_video
-                is HairFragment -> R.id.nav_hair
-                is SettingsFragment -> R.id.nav_settings
-                else -> R.id.nav_photo
+            if (current == null) {
+                // 极端情况（进程被回收后恢复不到 Fragment）：兜底回照片页
+                show(PhotoEditorFragment())
+                selectTabSilently(R.id.nav_photo)
+            } else {
+                val id = when (current) {
+                    is VideoSlimFragment -> R.id.nav_video
+                    is HairFragment -> R.id.nav_hair
+                    is SettingsFragment -> R.id.nav_settings
+                    else -> R.id.nav_photo
+                }
+                selectTabSilently(id)
             }
-            selectTabSilently(id)
         }
 
         requestLegacyStorageIfNeeded()

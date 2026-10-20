@@ -68,8 +68,9 @@ class PhotoEditorFragment : Fragment() {
         binding.btnSave.setOnClickListener { saveCurrent() }
 
         binding.sbBrightness.setOnSeekBarChangeListener(slider { params.brightness = it / 100f * 0.6f - 0.3f })
-        binding.sbContrast.setOnSeekBarChangeListener(slider { params.contrast = 0.7f + it / 100f * 0.7f })
-        binding.sbSaturation.setOnSeekBarChangeListener(slider { params.saturation = it / 100f * 1.6f })
+        // 对比度/饱和度的中性点要落在滑块中点(50)，否则用户拖到"中间"时画面会莫名变灰/变淡
+        binding.sbContrast.setOnSeekBarChangeListener(slider { params.contrast = 0.65f + it / 100f * 0.7f })
+        binding.sbSaturation.setOnSeekBarChangeListener(slider { params.saturation = 0.4f + it / 100f * 1.2f })
         binding.sbWarmth.setOnSeekBarChangeListener(slider { params.warmth = it / 100f * 2f - 1f })
         binding.sbBlur.setOnSeekBarChangeListener(slider { params.blur = it / 100f })
         binding.sbVignette.setOnSeekBarChangeListener(slider { params.vignette = it / 100f })
