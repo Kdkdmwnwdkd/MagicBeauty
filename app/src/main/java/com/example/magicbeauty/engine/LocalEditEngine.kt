@@ -31,6 +31,8 @@ class LocalEditEngine {
     private var maskRef: ByteArray? = null
     private var maskN = 0
     private var maskOk = false
+    private var texDisp = 0
+    private var dispKey = ""
     private var texA = 0   // warp 输出
     private var texB = 0   // adjust 输出
     private var fboA = 0
@@ -136,45 +138,21 @@ class LocalEditEngine {
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
 
         // 统一在这里做“没检测到就不变形”的兜底，视频/照片两条链路都不会再把效果套到画面中央。
-        // 另外：腿没拍全（胯到脚踝太短）时不做拉腿，否则会把上半身整体顶出画面。
-        // 拉腿起点按衣服类型决定：
-        //   · 长裤（衣服贴到脚踝）→ 从胯开始拉整条腿，裤子本来贴着腿，跟着变长是自然的；
-        //   · 裙子/短裤（下摆在大腿或小腿）→ 从下摆开始拉，裙摆只整体上移、长度不变；
-        //   · 没有衣服信息 → 退回膝盖。
-        // 裙摆/裤脚不能比膝盖低太多：袜子、长靴、厚底鞋常被误判成“裙子”，
-        // 下沿一路落到脚踝，按它当界线就只剩几像素可拉，等于没效果。
-        val hemOk = guide.hasClothes &&
-                (guide.clothesHemY - guide.ankleY) > 0.04f &&
-                guide.clothesHemY > guide.legTopY - 0.06f
-        val legTop = when {
-            guide.hasClothes && guide.clothesIsPants -> guide.hipY
-            hemOk -> guide.clothesHemY
-            else -> guide.legTopY
-        }
-        // 横向作用半径：裙子用裙摆宽度，这样裙摆整体一起上移；其它用身体半宽
-        val legHalfW = if (guide.hasClothes && !guide.clothesIsPants && guide.clothesHalfW > 0.05f)
-            guide.clothesHalfW else guide.bodyHalfW
-
-        // 门槛放到 0.035：洛丽塔这类长裙只露一小截小腿，腿段本来只有几个百分点画面高，
-        // 卡 0.05 会把整条腿判成“不存在”，拉滑块就完全没反应。
-        val legOk = guide.hasPose && (legTop - guide.ankleY) > 0.03f && guide.ankleY > 0.005f
-        // 腰必须在腿段上沿附近：半身照（看不到腿）里“腰”会被推到画面边缘，
-        // 收出来就是腰侧一片放光，不如干脆不生效。
-        val waistOk = guide.hasPose && guide.bodyHalfW > 0.04f &&
-                guide.waistY > 0.18f && guide.waistY < 0.95f &&
-                (guide.waistY - legTop) > -0.06f && (guide.waistY - legTop) < 0.32f
+        // 拉腿起点、腿段是否可用、瘦腰是否可用，都在 WarpGuide 里按穿着算好（见 legTopResolved）。
         val eff = params.copy(
             thinFace = if (guide.hasFace) params.thinFace else 0f,
             eyeEnlarge = if (guide.hasFace)
                 (params.eyeEnlarge * guide.eyeGain).coerceIn(0f, 0.40f) else 0f,
-            waistSlim = if (waistOk) params.waistSlim else 0f,
-            legStretch = if (legOk) params.legStretch else 0f
+            waistSlim = if (guide.waistOk) params.waistSlim else 0f,
+            legStretch = if (guide.legOk) params.legStretch else 0f
         )
 
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboA)
         GLES20.glViewport(0, 0, width, height)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
+        val aspect = width.toFloat() / height.toFloat().coerceAtLeast(1f)
 
         // —— 段①：Warp ——
         GLES20.glUseProgram(warpProg)
@@ -195,8 +173,8 @@ class LocalEditEngine {
         val mtex = if (maskN > 0) 1.6f / maskN else 1.6f / 473f
         f(warpProg, "uMaskTexel", mtex, mtex)
         bindTex(warpProg, "uMask", if (hasMask && maskOk) texMask else texSrc, 1)
-        val fc = guide.faceCenter; val el = guide.eyeL; val er = guide.eyeR; val bc = guide.bodyCenter
-        f(warpProg, "uAspect", width.toFloat() / height.toFloat().coerceAtLeast(1f))
+        val fc = guide.faceCenter; val el = guide.eyeL; val er = guide.eyeR
+        f(warpProg, "uAspect", aspect)
         f(warpProg, "uFaceCenter", fc.x, fc.y)
         f(warpProg, "uFaceHalfW", guide.faceHalfW)
         f(warpProg, "uFaceHalfH", guide.faceHalfH)
@@ -205,17 +183,26 @@ class LocalEditEngine {
         f(warpProg, "uEyeR", er.x, er.y)
         f(warpProg, "uEyeRadius", guide.eyeRadius)
         f(warpProg, "uEyeEnlarge", eff.eyeEnlarge)
-        f(warpProg, "uBodyCenter", bc.x, bc.y)
-        f(warpProg, "uBodyHalfW", guide.bodyHalfW)
-        f(warpProg, "uWaistY", guide.waistY)
-        f(warpProg, "uWaistSlim", eff.waistSlim)
-        f(warpProg, "uHipY", if (legOk) legTop else guide.hipY)
-        f(warpProg, "uLegHalfW", legHalfW)
-        // 只有走“裙摆模式”时才需要两侧抬高；长裤是平直裤脚
-        f(warpProg, "uHemLift", if (legOk && guide.hasClothes && !guide.clothesIsPants)
-            guide.clothesEdgeLift else 0f)
-        f(warpProg, "uAnkleY", guide.ankleY)
-        f(warpProg, "uLegStretch", eff.legStretch)
+        // 拉腿 / 瘦腰：改为上传位移场纹理（CPU 侧按人体网格算，见 WarpField）
+        val dispOn = (eff.legStretch > 0.001f && guide.legOk) ||
+                (eff.waistSlim > 0.001f && guide.waistOk)
+        if (dispOn) {
+            val key = "${eff.legStretch}|${eff.waistSlim}|${guide.legTopResolved}|" +
+                    "${guide.ankleY}|${guide.waistY}|${guide.bodyHalfW}|" +
+                    "${System.identityHashCode(guide.personMask)}"
+            if (key != dispKey) {
+                val field = WarpField.build(guide, eff, aspect)
+                texDisp = uploadDisp(field, texDisp)
+                dispKey = key
+            }
+            f(warpProg, "uHasDisp", 1f)
+            f(warpProg, "uDispScale", WarpField.ENCODE_SCALE)
+            bindTex(warpProg, "uDisp", texDisp, 2)
+            bindTex(warpProg, "uTex", texSrc, 0)   // 恢复单元 0
+        } else {
+            f(warpProg, "uHasDisp", 0f)
+            dispKey = ""
+        }
         drawQuad()
 
         // —— 段②：Adjust ——
@@ -244,6 +231,7 @@ class LocalEditEngine {
         if (!initialized) return
         if (texSrc != 0) GLES20.glDeleteTextures(1, intArrayOf(texSrc), 0)
         if (texMask != 0) GLES20.glDeleteTextures(1, intArrayOf(texMask), 0)
+        if (texDisp != 0) GLES20.glDeleteTextures(1, intArrayOf(texDisp), 0)
         if (texA != 0) GLES20.glDeleteTextures(1, intArrayOf(texA), 0)
         if (texB != 0) GLES20.glDeleteTextures(1, intArrayOf(texB), 0)
         if (fboA != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fboA), 0)
@@ -253,8 +241,8 @@ class LocalEditEngine {
         EGL14.eglDestroySurface(eglDisplay, eglSurface)
         EGL14.eglTerminate(eglDisplay)
         initialized = false
-        texSrc = 0; texA = 0; texB = 0; texMask = 0
-        maskRef = null; maskN = 0; maskOk = false
+        texSrc = 0; texA = 0; texB = 0; texMask = 0; texDisp = 0
+        maskRef = null; maskN = 0; maskOk = false; dispKey = ""
         fboA = 0; fboB = 0
         targetsW = 0; targetsH = 0
         try { flipBitmap?.recycle() } catch (_: Exception) {}
@@ -351,6 +339,44 @@ class LocalEditEngine {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        return tex[0]
+    }
+
+    /**
+     * 上传位移场（RGBA，R=du、G=dv，按 ENCODE_SCALE 编码）。
+     * 用 RGBA 而非 LA/LUMINANCE：部分机型对非 2 次幂的亮度纹理采样会返回 0。
+     */
+    private fun uploadDisp(data: FloatArray, reuse: Int): Int {
+        val w = WarpField.W
+        val h = WarpField.H
+        val tex = IntArray(1)
+        if (reuse == 0) GLES20.glGenTextures(1, tex, 0) else tex[0] = reuse
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+
+        val buf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
+        var i = 0
+        val inv = 1f / WarpField.ENCODE_SCALE
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val du = data[i++]
+                val dv = data[i++]
+                buf.put(((du * inv + 0.5f).coerceIn(0f, 1f) * 255f + 0.5f).toInt().toByte())
+                buf.put(((dv * inv + 0.5f).coerceIn(0f, 1f) * 255f + 0.5f).toInt().toByte())
+                buf.put(0.toByte())
+                buf.put(255.toByte())
+            }
+        }
+        buf.position(0)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+        )
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         return tex[0]
     }
 

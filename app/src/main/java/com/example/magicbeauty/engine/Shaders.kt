@@ -49,15 +49,10 @@ object Shaders {
         uniform float uEyeRadius;    // 以图片高度为单位
         uniform float uEyeEnlarge;   // 0..0.35
 
-        uniform vec2  uBodyCenter;   // 身体中线（腰部位置）
-        uniform float uBodyHalfW;    // 半腰宽（按图片宽度归一化）
-        uniform float uWaistY;       // 腰线
-        uniform float uWaistSlim;    // 0..1 瘦腰
-        uniform float uHipY;         // 腿段上界（裙子=裙摆下沿 / 长裤=胯 / 兜底=膝盖）
-        uniform float uLegHalfW;     // 拉腿的横向作用半径（裙子用裙摆半宽）
-        uniform float uHemLift;      // 裙摆两侧比中间高多少（大摆裙用）
-        uniform float uAnkleY;       // 脚踝（腿段下界）
-        uniform float uLegStretch;   // 0..0.18 拉腿
+        // 拉腿 / 瘦腰：位移场（CPU 侧按人体网格算出，见 WarpField）
+        uniform sampler2D uDisp;
+        uniform float uDispScale;    // 解码比例（位移 = (纹素 - 0.5) * uDispScale）
+        uniform float uHasDisp;
 
         // 人体权重（5 点平均做羽化，避免蒙版边缘出现硬切）
         float personWeight(vec2 uv) {
@@ -85,64 +80,6 @@ object Shaders {
 
         void main() {
             vec2 uv = vUV;
-
-            // ---------- ① 拉腿：分段映射 ----------
-            // 脚踝以下（脚、鞋）保持原样，只把「胯 → 脚踝」这一段按比例拉长，
-            // 拉长的部分由胯以上整体上移吸收。所以不会有“鞋不动、脚被拉长”。
-            // 横向再做一层「只在人体附近生效」的权重，否则门框、墙角这类竖线会被一起拉弯。
-            if (uLegStretch > 0.001) {
-                // 该列的腿段上界：中间用裙摆中线，靠两侧时按 uHemLift 抬高，
-                // 这样 A 字裙/大摆裙两侧更高也不会被当成“腿”多拉一截。
-                float dxn = abs(uv.x - uBodyCenter.x) / max(uLegHalfW, 0.02);
-                float top = uHipY + uHemLift * smoothstep(0.25, 1.10, dxn);
-                float L = max(top - uAnkleY, 0.02);
-
-                // 关键：按「目标增高量」算，不是按腿段长度的百分比。
-                // 旧写法 delta = uLegStretch * L，腿段越短位移越小 —— 洛丽塔长裙只露
-                // 一截小腿时，位移不到 1% 画面高，看起来就是“拉到 100 也没反应”。
-                // 现在先定目标增高（最多 11% 画面高），再换算成这一段的拉伸倍率，
-                // 腿段短就多拉一点、腿段长就少拉一点，视觉增高量一致。
-                float want  = uLegStretch * 0.11;
-                float s     = clamp(1.0 + want / L, 1.0, 1.42);   // 单段最多拉长 42%
-                float delta = (s - 1.0) * L;
-
-                float hipOut = top + delta;
-                float y = uv.y;
-                if (y >= hipOut) {
-                    y -= delta;
-                } else if (y > uAnkleY) {
-                    // 脚踝上方留一段过渡带：倍率从 1 平滑过渡到 s，
-                    // 否则脚踝那一行导数突变，会看到一道折痕。
-                    float soft = max(L * 0.14, 0.012);
-                    float d = y - uAnkleY;
-                    float k = clamp(d / soft, 0.0, 1.0);
-                    k = k * k * (3.0 - 2.0 * k);
-                    y = uAnkleY + d * mix(1.0, 1.0 / s, k);
-                }
-                // 有蒙版时完全交给蒙版（最后一步 mix）；没有蒙版（分割不可用）时
-                // 用横向超高斯兜底，只让身体附近的窄带有位移，远处的墙和门框不动。
-                // 两套同时上会双重衰减 → 边缘台阶，所以按 uHasMask 二选一。
-                if (uHasMask < 0.5) {
-                    float dxb = abs(uv.x - uBodyCenter.x) / max(uLegHalfW * 1.5, 0.05);
-                    y = mix(uv.y, y, exp(-pow(dxb, 4.0)));
-                }
-                uv.y = y;
-            }
-
-            // ---------- ② 瘦腰：平滑权重，无硬边 ----------
-            if (uWaistSlim > 0.001) {
-                float hw = max(uBodyHalfW * uAspect, 0.02);
-                float dx = (uv.x - uBodyCenter.x) / max(uBodyHalfW, 0.02);
-                // 垂直方向按画面高度给固定带宽（±7%），不要跟着腰宽缩：
-                // 腰宽窄的时候带宽会一起变窄，收腰只作用在一条细缝上，看着像没效果。
-                float dy = (uv.y - uWaistY) / 0.05;
-                // 权重形状：腰内（|dx|<0.75）满强度，到 1.55 倍半腰宽处归零。
-                // 之前用 exp(-dx*dx*k)，最大值在中心、轮廓处只剩 13%，等于“腰中间不动、
-                // 边上才动”，既不明显，又因为作用到轮廓外把墙/门框卷进来 → 放光变色。
-                float ax = abs(dx);
-                float w = (1.0 - smoothstep(0.75, 1.55, ax)) * exp(-dy * dy * 1.2);
-                uv.x = uBodyCenter.x + (uv.x - uBodyCenter.x) * (1.0 + uWaistSlim * 0.18 * w);
-            }
 
             // ---------- ③ 瘦脸：只收下颌轮廓，五官不动 ----------
             if (uThinFace > 0.001) {
@@ -174,7 +111,20 @@ object Shaders {
             float pw = min(personWeight(vUV), personWeight(uv));
             uv = mix(vUV, uv, pw);
 
-            gl_FragColor = texture2D(uTex, uv);
+            // ---------- ① 拉腿 / 瘦腰：位移场 ----------
+            // 位移由 CPU 侧的人体网格算出（WarpField），这里只做一次取样 + 双线性插值。
+            // 放在最后，是因为位移场里的量已经乘过人体权重；若和上面的 personWeight
+            // 再乘一次，边缘会被二次衰减（之前“瘦腰不明显”的一个隐藏原因）。
+            // 好处：
+            //   · 背景格点位移恒为 0 → 背景完全不动，不靠权重硬压；
+            //   · 网格插值天然平滑，不会出现台阶、折痕、光晕；
+            //   · 裙摆/脚踝的约束写在顶点上，长裙短裙都能处理。
+            if (uHasDisp > 0.5) {
+                vec2 d = texture2D(uDisp, vUV).rg - 0.5;
+                uv += d * uDispScale;
+            }
+
+            gl_FragColor = texture2D(uTex, clamp(uv, 0.0, 1.0));
         }
     """
 

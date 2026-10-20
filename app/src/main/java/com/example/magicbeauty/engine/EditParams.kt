@@ -60,6 +60,29 @@ data class WarpGuide(
     val hasFace: Boolean = false,
     val hasPose: Boolean = false
 ) {
+    /**
+     * 腿段上界（已按穿着决定）：长裤=胯，裙子/短裤=裙摆下沿，兜底=膝盖。
+     * 裙摆比膝盖低太多（袜子、长靴被误判成裙子）时不采信，退回膝盖。
+     */
+    val legTopResolved: Float
+        get() = when {
+            hasClothes && clothesIsPants -> hipY
+            hasClothes && (clothesHemY - ankleY) > 0.04f &&
+                    clothesHemY > legTopY - 0.06f -> clothesHemY
+            else -> legTopY
+        }
+
+    /** 拉腿是否可用 */
+    val legOk: Boolean
+        get() = hasPose && (legTopResolved - ankleY) > 0.03f && ankleY > 0.005f
+
+    /** 瘦腰是否可用：腰必须在腿段上沿附近，半身照（看不到腿）不生效 */
+    val waistOk: Boolean
+        get() = hasPose && bodyHalfW > 0.04f &&
+                waistY > 0.18f && waistY < 0.95f &&
+                (waistY - legTopResolved) > -0.06f &&
+                (waistY - legTopResolved) < 0.32f
+
     companion object {
         // MediaPipe 归一化坐标(y 向下) -> GL 坐标(y 向上)
         fun toGL(x: Float, y: Float) = PointF(x, 1f - y)
