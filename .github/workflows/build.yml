@@ -105,6 +105,13 @@ jobs:
 
       # 构建成功即自动发布/更新同名 Release，手机浏览器收藏
       # releases/latest 页面即可永远拿到最新 APK（替代 artifact 90 天失效+需解压）
+      - name: 重命名 APK
+        if: success()
+        run: |
+          V="${{ steps.ver.outputs.V }}"
+          cp app/build/outputs/apk/debug/app-debug.apk "MagicBeauty-v${V}.apk"
+          ls -lh "MagicBeauty-v${V}.apk"
+
       - name: 发布到 GitHub Release
         if: success()
         uses: softprops/action-gh-release@v2
@@ -114,7 +121,7 @@ jobs:
           body: |
             自动构建发布。更新内容见 git log。
             手机浏览器直接下载本页面的 APK 安装即可（约 137MB，首次打开需加载人体解析模型）。
-          files: app/build/outputs/apk/debug/*.apk
+          files: MagicBeauty-v${{ steps.ver.outputs.V }}.apk
           fail_on_unmatched_files: true
 
       - name: 打印 APK 路径
