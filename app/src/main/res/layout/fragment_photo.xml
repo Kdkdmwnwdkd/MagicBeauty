@@ -121,6 +121,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnSave"
+            style="?attr/materialButtonOutlinedStyle"
             android:layout_width="wrap_content"
             android:layout_height="38dp"
             android:enabled="false"
@@ -156,7 +157,7 @@
             android:layout_gravity="center_horizontal"
             android:background="@drawable/bg_handle" />
 
-        <!-- 三个分类标签 -->
+        <!-- 四个分类标签 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -187,6 +188,18 @@
                 android:textSize="13.5sp" />
 
             <TextView
+                android:id="@+id/tabFace"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_tab"
+                android:gravity="center"
+                android:text="面部"
+                android:textColor="@color/tab_text"
+                android:textSize="13.5sp" />
+
+            <TextView
                 android:id="@+id/tabShape"
                 android:layout_width="0dp"
                 android:layout_height="40dp"
@@ -194,7 +207,7 @@
                 android:layout_weight="1"
                 android:background="@drawable/bg_tab"
                 android:gravity="center"
-                android:text="塑形"
+                android:text="身材"
                 android:textColor="@color/tab_text"
                 android:textSize="13.5sp" />
         </LinearLayout>
@@ -367,6 +380,26 @@
 
                 <TextView
                     style="@style/SliderLabel"
+                    android:text="美白" />
+
+                <SeekBar
+                    android:id="@+id/sbWhiten"
+                    style="@style/AppSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/SliderLabel"
                     android:text="暗角" />
 
                 <SeekBar
@@ -380,9 +413,9 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- 塑形 -->
+        <!-- 面部 -->
         <LinearLayout
-            android:id="@+id/groupShape"
+            android:id="@+id/groupFace"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
@@ -437,6 +470,76 @@
 
                 <TextView
                     style="@style/SliderLabel"
+                    android:text="瘦鼻" />
+
+                <SeekBar
+                    android:id="@+id/sbNose"
+                    style="@style/AppSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/SliderLabel"
+                    android:text="唇形" />
+
+                <SeekBar
+                    android:id="@+id/sbMouth"
+                    style="@style/AppSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/SliderLabel"
+                    android:text="下巴" />
+
+                <SeekBar
+                    android:id="@+id/sbChin"
+                    style="@style/AppSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 身材 -->
+        <LinearLayout
+            android:id="@+id/groupShape"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/SliderLabel"
                     android:text="瘦腰" />
 
                 <SeekBar
@@ -461,6 +564,86 @@
 
                 <SeekBar
                     android:id="@+id/sbLeg"
+                    style="@style/AppSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/SliderLabel"
+                    android:text="瘦肩" />
+
+                <SeekBar
+                    android:id="@+id/sbShoulder"
+                    style="@style/AppSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/SliderLabel"
+                    android:text="瘦手臂" />
+
+                <SeekBar
+                    android:id="@+id/sbArm"
+                    style="@style/AppSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/SliderLabel"
+                    android:text="瘦臀" />
+
+                <SeekBar
+                    android:id="@+id/sbHip"
+                    style="@style/AppSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="30dp"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/SliderLabel"
+                    android:text="瘦腿" />
+
+                <SeekBar
+                    android:id="@+id/sbLegSlim"
                     style="@style/AppSeekBar"
                     android:layout_width="0dp"
                     android:layout_height="30dp"

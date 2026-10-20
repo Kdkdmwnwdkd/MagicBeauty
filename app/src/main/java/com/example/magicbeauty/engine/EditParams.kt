@@ -14,13 +14,21 @@ data class EditParams(
     var warmth: Float = 0f,
     var blur: Float = 0f,        // 磨皮
     var vignette: Float = 0f,
+    var whiten: Float = 0f,      // 美白（只提亮肤色区域）
     var filterId: Int = 0,       // 滤镜预设（见 Filters.presets）
     // 人脸形变
     var thinFace: Float = 0f,    // 瘦脸
     var eyeEnlarge: Float = 0f,  // 大眼
+    var noseSlim: Float = 0f,    // 瘦鼻
+    var mouthSlim: Float = 0f,   // 缩唇
+    var chinSlim: Float = 0f,    // 瘦下巴
     // 身材形变
     var waistSlim: Float = 0f,   // 瘦腰
-    var legStretch: Float = 0f   // 拉腿/调身高
+    var legStretch: Float = 0f,  // 拉腿/调身高
+    var shoulderSlim: Float = 0f,// 瘦肩
+    var armSlim: Float = 0f,     // 瘦手臂
+    var hipSlim: Float = 0f,     // 瘦臀
+    var legSlim: Float = 0f      // 瘦腿
 )
 
 /**
@@ -34,6 +42,16 @@ data class WarpGuide(
     val eyeL: PointF = PointF(0.4f, 0.6f),
     val eyeR: PointF = PointF(0.6f, 0.6f),
     val eyeRadius: Float = 0.07f,
+    // —— 面部重塑引导（face mesh 478 点推导）——
+    /** 鼻中心（鼻尖附近）与半宽（两个鼻孔间距的一半） */
+    val nose: PointF = PointF(0.5f, 0.70f),
+    val noseHalfW: Float = 0.030f,
+    /** 嘴中心与半宽（两口角间距的一半） */
+    val mouth: PointF = PointF(0.5f, 0.62f),
+    val mouthHalfW: Float = 0.040f,
+    /** 下巴中心与半宽（下巴颏处脸宽的一半） */
+    val chin: PointF = PointF(0.5f, 0.50f),
+    val chinHalfW: Float = 0.055f,
     val bodyCenter: PointF = PointF(0.5f, 0.45f),
     val bodyHalfW: Float = 0.18f,
     val waistY: Float = 0.45f,
@@ -41,6 +59,22 @@ data class WarpGuide(
     /** 腿段上界：优先用膝盖（这样裙子/长上衣只会整体上移，不会被拉长） */
     val legTopY: Float = 0.35f,
     val ankleY: Float = 0.05f,
+    // —— 瘦肩/瘦手臂/瘦臀/瘦腿 引导（pose 优先，人体解析兜底）——
+    /** 肩线高度（GL）与肩线半宽 */
+    val shoulderY: Float = 0f,
+    val shoulderHalfW: Float = 0f,
+    /** 手臂带（左右各一条竖直带）：上下界（GL）与半宽、左右中心 x */
+    val armTopY: Float = 0f,
+    val armBotY: Float = 0f,
+    val armHalfW: Float = 0f,
+    val armCxL: Float = 0f,
+    val armCxR: Float = 0f,
+    /** 手臂引导是否可用：需要 pose 的肩/肘/腕（解析分不出被头发遮住的手臂） */
+    val hasArms: Boolean = false,
+    /** 胯宽半宽（胯骨实际宽，瘦臀作用带） */
+    val hipHalfW: Float = 0f,
+    /** 腿宽半宽（大腿中段实测，瘦腿作用带） */
+    val legHalfW: Float = 0f,
     /** 衣服下沿（GL 坐标）——拉腿的起点；裙子/短裤用它，长裤会用胯 */
     val clothesHemY: Float = 0f,
     /** 衣服下沿处的半宽（裙摆宽度），拉腿的横向作用范围 */
@@ -86,6 +120,27 @@ data class WarpGuide(
                 waistY > 0.18f && waistY < 0.95f &&
                 (waistY - legTopResolved) > -0.06f &&
                 (waistY - legTopResolved) < 0.32f
+
+    /** 瘦肩是否可用 */
+    val shoulderOk: Boolean
+        get() = hasPose && shoulderHalfW > 0.030f && shoulderY > 0.30f && shoulderY < 0.98f
+
+    /** 瘦手臂是否可用（必须有 pose 的肩肘腕） */
+    val armOk: Boolean
+        get() = hasArms && armHalfW > 0.015f && (armTopY - armBotY) > 0.05f
+
+    /** 瘦臀是否可用 */
+    val hipOk: Boolean
+        get() = hasPose && hipHalfW > 0.030f && hipY > 0.05f && hipY < 0.95f
+
+    /** 瘦腿是否可用：腿段要够长，腿宽要量到 */
+    val legSlimOk: Boolean
+        get() = hasPose && legHalfW > 0.020f &&
+                (legTopResolved - ankleY) > 0.04f
+
+    /** 面部重塑（鼻/唇/下巴）是否可用 */
+    val faceFeatureOk: Boolean
+        get() = hasFace
 
     companion object {
         // MediaPipe 归一化坐标(y 向下) -> GL 坐标(y 向上)

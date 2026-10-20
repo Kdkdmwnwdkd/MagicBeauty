@@ -39,7 +39,12 @@ object WarpField {
 
         val legOn = params.legStretch > 0.001f && guide.legOk
         val waistOn = params.waistSlim > 0.001f && guide.waistOk
-        if (!legOn && !waistOn) return out
+        // 塑形四件套：瘦肩/瘦手臂/瘦臀/瘦腿
+        val shoulderOn = params.shoulderSlim > 0.001f && guide.shoulderOk
+        val armOn = params.armSlim > 0.001f && guide.armOk
+        val hipOn = params.hipSlim > 0.001f && guide.hipOk
+        val legSlimOn = params.legSlim > 0.001f && guide.legSlimOk
+        if (!legOn && !waistOn && !shoulderOn && !armOn && !hipOn && !legSlimOn) return out
 
         // ---- 拉腿参数 ----
         val legTop = guide.legTopResolved
@@ -133,6 +138,60 @@ object WarpField {
                         val dy = (v - waistY) / 0.028f
                         val wy = exp(-(dy * dy * 2.6f).toDouble()).toFloat()
                         du = (u - cx) * params.waistSlim * 0.18f * wx * wy
+                    }
+
+                    // —— 瘦肩：肩线横向收缩。垂直带 ±3%（肩线有厚度，比瘦腰略宽），
+                    //    横向到 1.5 倍半肩宽归零，只收肩不连云袖/墙。
+                    if (shoulderOn) {
+                        val dy = (v - guide.shoulderY) / 0.030f
+                        val wy = exp(-(dy * dy * 2.6f).toDouble()).toFloat()
+                        val ax = abs(u - cx) / guide.shoulderHalfW
+                        val wx = 1f - smoothstep(0.85f, 1.50f, ax)
+                        du += (u - cx) * params.shoulderSlim * 0.10f * wx * wy
+                    }
+
+                    // —— 瘦手臂：左右各一条竖直带（肩→腕），各自向自己的中心收。
+                    //    两个中心可能很近（手臂贴身），此时两条带自然叠加，
+                    //    效果就是连手臂带侧腰一起收，符合"瘦手臂"的直觉。
+                    if (armOn) {
+                        val armBands = floatArrayOf(guide.armCxL, guide.armCxR)
+                        for (bi in 0 until 2) {
+                            val acx = armBands[bi]
+                            val ax = abs(u - acx) / guide.armHalfW
+                            if (ax < 1.7f) {
+                                val wx = 1f - smoothstep(0.70f, 1.70f, ax)
+                                val above = (v - guide.armTopY) / 0.030f
+                                val below = (guide.armBotY - v) / 0.030f
+                                val wy = when {
+                                    above > 0f -> exp(-(above * above * 3.0).toDouble()).toFloat()
+                                    below > 0f -> exp(-(below * below * 3.0).toDouble()).toFloat()
+                                    else -> 1f
+                                }
+                                du += (u - acx) * params.armSlim * 0.12f * wx * wy
+                            }
+                        }
+                    }
+
+                    // —— 瘦臀：胯线横向收缩，带 ±3.2%（胯有厚度）——
+                    if (hipOn) {
+                        val dy = (v - guide.hipY) / 0.032f
+                        val wy = exp(-(dy * dy * 2.6f).toDouble()).toFloat()
+                        val ax = abs(u - cx) / guide.hipHalfW
+                        val wx = 1f - smoothstep(0.80f, 1.55f, ax)
+                        du += (u - cx) * params.hipSlim * 0.12f * wx * wy
+                    }
+
+                    // —— 瘦腿：腿段（legTop→踝）整体横向收缩，靠胯强、靠踝弱
+                    //    （越往下腿越细，收缩感递减，不会把脚踝收成锥子）。
+                    if (legSlimOn) {
+                        val top = legTop
+                        if (v < top && v > ankle) {
+                            val ax = abs(u - cx) / guide.legHalfW
+                            val wx = 1f - smoothstep(0.85f, 1.60f, ax)
+                            val t = ((top - v) / (top - ankle).coerceAtLeast(0.02f)).coerceIn(0f, 1f)
+                            val wy = 0.45f + 0.55f * t
+                            du += (u - cx) * params.legSlim * 0.10f * wx * wy
+                        }
                     }
                 }
 

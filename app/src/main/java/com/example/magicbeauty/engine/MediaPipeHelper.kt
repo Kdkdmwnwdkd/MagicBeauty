@@ -82,6 +82,15 @@ class MediaPipeHelper(context: Context) {
                 val faceW = (halfW * 2f * aspect).coerceAtLeast(0.02f)
                 val eyeRatio = (eyeW / faceW).coerceIn(0.06f, 0.40f)
                 val eyeGain = (0.17f / eyeRatio).coerceIn(0.55f, 1.30f)
+                // —— 面部重塑引导（478 点 mesh）——
+                // 鼻：鼻尖 1、鼻梁 168，半宽取两个鼻孔 98/327 间距的一半
+                val noseC = mid(lm[1], lm[168])
+                val noseHW = dist(lm[98], lm[327]) / 2f
+                // 嘴：两口角 61/291，半宽取其间距一半
+                val mouthC = mid(lm[61], lm[291])
+                val mouthHW = dist(lm[61], lm[291]) / 2f
+                // 下巴：颏部 152，半宽取脸颊 234/454 间距的 72%（下巴比脸颊窄）
+                val chinHW = dist(lm[234], lm[454]) / 2f * 0.72f
                 guide = guide.copy(
                     faceCenter = WarpGuide.toGL(center.x, center.y),
                     faceHalfW = halfW.coerceIn(0.04f, 0.30f),
@@ -90,6 +99,12 @@ class MediaPipeHelper(context: Context) {
                     eyeR = WarpGuide.toGL(mid(lm[263], lm[362]).x, mid(lm[263], lm[362]).y),
                     eyeRadius = (eyeW * 1.30f).coerceIn(0.02f, 0.12f),
                     eyeGain = eyeGain,
+                    nose = WarpGuide.toGL(noseC.x, noseC.y),
+                    noseHalfW = noseHW.coerceIn(0.012f, 0.06f),
+                    mouth = WarpGuide.toGL(mouthC.x, mouthC.y),
+                    mouthHalfW = mouthHW.coerceIn(0.015f, 0.08f),
+                    chin = WarpGuide.toGL(lm[152].x(), lm[152].y()),
+                    chinHalfW = chinHW.coerceIn(0.02f, 0.12f),
                     hasFace = true
                 )
             }
@@ -125,6 +140,17 @@ class MediaPipeHelper(context: Context) {
                     val kneeOk = knee.y > hip.y + 0.02f && knee.y < ankle.y - 0.04f
                     val legTopImg = if (kneeOk) knee.y else hip.y
 
+                    // —— 瘦肩/瘦手臂/瘦臀/瘦腿 引导（骨骼直接给）——
+                    val shL = p[11]; val shR = p[12]
+                    val elL = p[13]; val elR = p[14]
+                    val wrL = p[15]; val wrR = p[16]
+                    // 手臂带：肩→腕的竖直范围（上下各留 1.5% 余量），
+                    // 中心取肩与腕连线的中点 x（手臂弯曲时也大致压在手臂上）
+                    val armTopImg = minOf(shL.y, wrL.y, shR.y, wrR.y)
+                    val armBotImg = maxOf(shL.y, wrL.y, shR.y, wrR.y)
+                    val armHalf = maxOf(dist(shL, elL), dist(shR, elR)) * 0.30f
+                    // 胯宽 = 胯骨间距 ×1.05（胯骨外侧还有肉，瘦臀要覆盖到）
+
                     guide = guide.copy(
                         bodyCenter = WarpGuide.toGL(hip.x, waistYImg),
                         bodyHalfW = halfW.coerceIn(0.05f, 0.35f),
@@ -132,6 +158,15 @@ class MediaPipeHelper(context: Context) {
                         hipY = 1f - hip.y,
                         legTopY = 1f - legTopImg,
                         ankleY = 1f - ankle.y,
+                        shoulderY = 1f - shoulder.y,
+                        shoulderHalfW = shoulderHalf.coerceIn(0.04f, 0.40f),
+                        armTopY = (1f - armTopImg + 0.015f).coerceIn(0f, 1f),
+                        armBotY = (1f - armBotImg - 0.015f).coerceIn(0f, 1f),
+                        armHalfW = armHalf.coerceIn(0.018f, 0.10f),
+                        armCxL = (shL.x + wrL.x) / 2f,
+                        armCxR = (shR.x + wrR.x) / 2f,
+                        hasArms = true,
+                        hipHalfW = (hipHalf * 1.05f).coerceIn(0.03f, 0.40f),
                         hasPose = true
                     )
                 }
@@ -162,6 +197,11 @@ class MediaPipeHelper(context: Context) {
                         hipY = if (usePose) guide.hipY else hp.hipY,
                         legTopY = if (usePose) guide.legTopY else hp.legTopY,
                         ankleY = if (usePose) guide.ankleY else hp.ankleY,
+                        // 瘦肩/瘦臀/瘦腿 引导：pose 有时用骨骼值，没有就用解析实测值
+                        shoulderY = if (usePose) guide.shoulderY else hp.shoulderY,
+                        shoulderHalfW = if (usePose) guide.shoulderHalfW else hp.shoulderHalfW,
+                        hipHalfW = if (usePose) guide.hipHalfW else hp.hipHalfW,
+                        legHalfW = if (usePose) guide.legHalfW else hp.legHalfW,
                         // 中线与腰宽一律用解析值：它是按实际像素量的，
                         // 比骨骼肩宽的估计更贴腰，瘦腰范围才不会把墙/门框卷进来。
                         bodyCenter = PointF(hp.centerX, waistY),

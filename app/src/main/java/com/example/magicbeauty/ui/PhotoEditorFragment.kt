@@ -79,7 +79,8 @@ class PhotoEditorFragment : Fragment() {
         // 底部工具面板：常驻显示，点标签切换分类，再点同一个标签收起/展开滑块
         binding.tabLight.setOnClickListener { selectTab(0) }
         binding.tabTexture.setOnClickListener { selectTab(1) }
-        binding.tabShape.setOnClickListener { selectTab(2) }
+        binding.tabFace.setOnClickListener { selectTab(2) }
+        binding.tabShape.setOnClickListener { selectTab(3) }
         binding.sheetHandle.setOnClickListener { setExpanded(!expanded) }
         selectTab(0)
 
@@ -107,6 +108,7 @@ class PhotoEditorFragment : Fragment() {
         binding.sbSaturation.setOnSeekBarChangeListener(slider { params.saturation = 0.4f + it / 100f * 1.2f })
         binding.sbWarmth.setOnSeekBarChangeListener(slider { params.warmth = it / 100f * 2f - 1f })
         binding.sbBlur.setOnSeekBarChangeListener(slider { params.blur = it / 100f })
+        binding.sbWhiten.setOnSeekBarChangeListener(slider { params.whiten = it / 100f })
         binding.sbVignette.setOnSeekBarChangeListener(slider { params.vignette = it / 100f })
 
         // 滤镜：一排标签，点哪个套哪个（矩阵在 GPU 一次算完）
@@ -121,8 +123,17 @@ class PhotoEditorFragment : Fragment() {
         }
         binding.sbThinFace.setOnSeekBarChangeListener(slider { params.thinFace = it / 100f })
         binding.sbEye.setOnSeekBarChangeListener(slider { params.eyeEnlarge = it / 100f * 0.35f })
+        // 面部重塑：瘦鼻/缩唇/瘦下巴（face mesh 478 点定位，只动一小块）
+        binding.sbNose.setOnSeekBarChangeListener(slider { params.noseSlim = it / 100f })
+        binding.sbMouth.setOnSeekBarChangeListener(slider { params.mouthSlim = it / 100f })
+        binding.sbChin.setOnSeekBarChangeListener(slider { params.chinSlim = it / 100f })
         binding.sbWaist.setOnSeekBarChangeListener(slider { params.waistSlim = it / 100f })
         binding.sbLeg.setOnSeekBarChangeListener(slider { params.legStretch = it / 100f * 0.25f })
+        // 塑形四件套：瘦肩/瘦手臂/瘦臀/瘦腿（位移场水平收缩）
+        binding.sbShoulder.setOnSeekBarChangeListener(slider { params.shoulderSlim = it / 100f })
+        binding.sbArm.setOnSeekBarChangeListener(slider { params.armSlim = it / 100f })
+        binding.sbHip.setOnSeekBarChangeListener(slider { params.hipSlim = it / 100f })
+        binding.sbLegSlim.setOnSeekBarChangeListener(slider { params.legSlim = it / 100f })
     }
 
     private fun slider(onChange: (Int) -> Unit) = object : android.widget.SeekBar.OnSeekBarChangeListener {
@@ -148,7 +159,8 @@ class PhotoEditorFragment : Fragment() {
         currentTab = index
         b.tabLight.isSelected = index == 0
         b.tabTexture.isSelected = index == 1
-        b.tabShape.isSelected = index == 2
+        b.tabFace.isSelected = index == 2
+        b.tabShape.isSelected = index == 3
         applyGroupVisibility()
         if (!expanded) setExpanded(true) else updatePreviewInsets()
     }
@@ -160,7 +172,7 @@ class PhotoEditorFragment : Fragment() {
 
     private fun applyGroupVisibility() {
         val b = _binding ?: return
-        val groups = arrayOf(b.groupLight, b.groupTexture, b.groupShape)
+        val groups = arrayOf(b.groupLight, b.groupTexture, b.groupFace, b.groupShape)
         groups.forEachIndexed { i, g ->
             val show = expanded && i == currentTab
             if (show) {
@@ -234,11 +246,11 @@ class PhotoEditorFragment : Fragment() {
         val off = ArrayList<String>(2)
         if (!guide.hasFace) {
             missing.add("人脸")
-            off.add("瘦脸/大眼")
+            off.add("瘦脸/大眼/瘦鼻/唇形/下巴")
         }
         if (!guide.hasPose) {
             missing.add("人体")
-            off.add("瘦腰/拉腿")
+            off.add("瘦腰/拉腿/瘦肩/瘦臀/瘦腿")
         }
         if (missing.isEmpty()) {
             binding.tvHint.visibility = View.GONE
@@ -266,7 +278,15 @@ class PhotoEditorFragment : Fragment() {
                     thinFace = if (g.hasFace) params.thinFace else 0f,
                     eyeEnlarge = if (g.hasFace) params.eyeEnlarge else 0f,
                     waistSlim = if (g.hasPose) params.waistSlim else 0f,
-                    legStretch = if (g.hasPose) params.legStretch else 0f
+                    legStretch = if (g.hasPose) params.legStretch else 0f,
+                    // 面部重塑与塑形四件套：引导不可用时清零（引擎里也有同样的门控）
+                    noseSlim = if (g.faceFeatureOk) params.noseSlim else 0f,
+                    mouthSlim = if (g.faceFeatureOk) params.mouthSlim else 0f,
+                    chinSlim = if (g.faceFeatureOk) params.chinSlim else 0f,
+                    shoulderSlim = if (g.shoulderOk) params.shoulderSlim else 0f,
+                    armSlim = if (g.armOk) params.armSlim else 0f,
+                    hipSlim = if (g.hipOk) params.hipSlim else 0f,
+                    legSlim = if (g.legSlimOk) params.legSlim else 0f
                 )
                 val out = withContext(glDispatcher) { engine.render(effective, g) }
                 if (_binding == null || !isAdded) return@launch

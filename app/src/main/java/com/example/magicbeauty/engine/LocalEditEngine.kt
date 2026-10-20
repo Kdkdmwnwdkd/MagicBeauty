@@ -144,7 +144,16 @@ class LocalEditEngine {
             eyeEnlarge = if (guide.hasFace)
                 (params.eyeEnlarge * guide.eyeGain).coerceIn(0f, 0.40f) else 0f,
             waistSlim = if (guide.waistOk) params.waistSlim else 0f,
-            legStretch = if (guide.legOk) params.legStretch else 0f
+            legStretch = if (guide.legOk) params.legStretch else 0f,
+            // 面部重塑：没检出脸就不做（默认坐标硬套会把鼻子收歪）
+            noseSlim = if (guide.faceFeatureOk) params.noseSlim else 0f,
+            mouthSlim = if (guide.faceFeatureOk) params.mouthSlim else 0f,
+            chinSlim = if (guide.faceFeatureOk) params.chinSlim else 0f,
+            // 塑形四件套：各自的引导不可用就不做
+            shoulderSlim = if (guide.shoulderOk) params.shoulderSlim else 0f,
+            armSlim = if (guide.armOk) params.armSlim else 0f,
+            hipSlim = if (guide.hipOk) params.hipSlim else 0f,
+            legSlim = if (guide.legSlimOk) params.legSlim else 0f
         )
 
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboA)
@@ -183,12 +192,30 @@ class LocalEditEngine {
         f(warpProg, "uEyeR", er.x, er.y)
         f(warpProg, "uEyeRadius", guide.eyeRadius)
         f(warpProg, "uEyeEnlarge", eff.eyeEnlarge)
-        // 拉腿 / 瘦腰：改为上传位移场纹理（CPU 侧按人体网格算，见 WarpField）
+        // 面部重塑（瘦鼻/缩唇/瘦下巴）
+        f(warpProg, "uNose", guide.nose.x, guide.nose.y)
+        f(warpProg, "uNoseHalfW", guide.noseHalfW)
+        f(warpProg, "uNoseSlim", eff.noseSlim)
+        f(warpProg, "uMouth", guide.mouth.x, guide.mouth.y)
+        f(warpProg, "uMouthHalfW", guide.mouthHalfW)
+        f(warpProg, "uMouthSlim", eff.mouthSlim)
+        f(warpProg, "uChin", guide.chin.x, guide.chin.y)
+        f(warpProg, "uChinHalfW", guide.chinHalfW)
+        f(warpProg, "uChinSlim", eff.chinSlim)
+        // 拉腿 / 瘦腰 / 瘦肩 / 瘦手臂 / 瘦臀 / 瘦腿：上传位移场纹理
         val dispOn = (eff.legStretch > 0.001f && guide.legOk) ||
-                (eff.waistSlim > 0.001f && guide.waistOk)
+                (eff.waistSlim > 0.001f && guide.waistOk) ||
+                (eff.shoulderSlim > 0.001f && guide.shoulderOk) ||
+                (eff.armSlim > 0.001f && guide.armOk) ||
+                (eff.hipSlim > 0.001f && guide.hipOk) ||
+                (eff.legSlim > 0.001f && guide.legSlimOk)
         if (dispOn) {
-            val key = "${eff.legStretch}|${eff.waistSlim}|${guide.legTopResolved}|" +
+            val key = "${eff.legStretch}|${eff.waistSlim}|${eff.shoulderSlim}|${eff.armSlim}|" +
+                    "${eff.hipSlim}|${eff.legSlim}|${guide.legTopResolved}|" +
                     "${guide.ankleY}|${guide.waistY}|${guide.bodyHalfW}|" +
+                    "${guide.shoulderY}|${guide.shoulderHalfW}|${guide.armTopY}|${guide.armBotY}|" +
+                    "${guide.armHalfW}|${guide.armCxL}|${guide.armCxR}|${guide.hipY}|" +
+                    "${guide.hipHalfW}|${guide.legHalfW}|" +
                     "${System.identityHashCode(guide.personMask)}"
             if (key != dispKey) {
                 val field = WarpField.build(guide, eff, aspect)
@@ -219,6 +246,7 @@ class LocalEditEngine {
         f(adjustProg, "uWarmth", params.warmth)
         f(adjustProg, "uBlur", params.blur)
         f(adjustProg, "uVignette", params.vignette)
+        f(adjustProg, "uWhiten", params.whiten)
         val preset = Filters.get(params.filterId)
         mat3(adjustProg, "uFilterMat", preset.m)
         vec3(adjustProg, "uFilterOff", preset.off)

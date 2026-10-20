@@ -49,6 +49,17 @@ object Shaders {
         uniform float uEyeRadius;    // 以图片高度为单位
         uniform float uEyeEnlarge;   // 0..0.35
 
+        // 面部重塑：瘦鼻/缩唇/瘦下巴（中心与半宽由 face mesh 478 点推导）
+        uniform vec2  uNose;
+        uniform float uNoseHalfW;
+        uniform float uNoseSlim;
+        uniform vec2  uMouth;
+        uniform float uMouthHalfW;
+        uniform float uMouthSlim;
+        uniform vec2  uChin;
+        uniform float uChinHalfW;
+        uniform float uChinSlim;
+
         // 拉腿 / 瘦腰：位移场（CPU 侧按人体网格算出，见 WarpField）
         uniform sampler2D uDisp;
         uniform float uDispScale;    // 解码比例（位移 = (纹素 - 0.5) * uDispScale）
@@ -102,6 +113,36 @@ object Shaders {
                 uv = magnify(uv, uEyeR, uEyeRadius, uEyeEnlarge, uAspect);
             }
 
+            // ---------- ⑤ 面部重塑：瘦鼻 / 缩唇 / 瘦下巴 ----------
+            // 局部横向收缩：中心附近、半径内把 x 向中心收。权重 t^2 在边界处为 0，
+            // 不会出现圆形接缝；只动一小块，五官其他部分不受影响。
+            if (uNoseSlim > 0.001) {
+                vec2 d = vec2((uv.x - uNose.x) * uAspect, uv.y - uNose.y);
+                float dist = length(d);
+                if (dist < uNoseHalfW) {
+                    float t = 1.0 - dist / uNoseHalfW;
+                    uv.x = uNose.x + (uv.x - uNose.x) * (1.0 - uNoseSlim * 0.22 * t * t);
+                }
+            }
+            if (uMouthSlim > 0.001) {
+                vec2 d = vec2((uv.x - uMouth.x) * uAspect, uv.y - uMouth.y);
+                float dist = length(d);
+                if (dist < uMouthHalfW) {
+                    float t = 1.0 - dist / uMouthHalfW;
+                    uv.x = uMouth.x + (uv.x - uMouth.x) * (1.0 - uMouthSlim * 0.20 * t * t);
+                }
+            }
+            if (uChinSlim > 0.001) {
+                // 下巴中心从颏部 152 略上移（覆盖下颌斜坡），半径取下巴半宽
+                vec2 cc = vec2(uChin.x, uChin.y + uChinHalfW * 0.35);
+                vec2 d = vec2((uv.x - cc.x) * uAspect, uv.y - cc.y);
+                float dist = length(d);
+                if (dist < uChinHalfW) {
+                    float t = 1.0 - dist / uChinHalfW;
+                    uv.x = cc.x + (uv.x - cc.x) * (1.0 - uChinSlim * 0.18 * t * t);
+                }
+            }
+
             // 只在人体范围内生效：背景像素直接沿用原始坐标，一点不动
             // （半条腿露出来、被裙摆遮住一部分的情况，也会按实际像素分别处理）
             uv = clamp(uv, 0.0, 1.0);
@@ -140,6 +181,7 @@ object Shaders {
         uniform float uWarmth;       // -1..1
         uniform float uBlur;         // 0..1 磨皮强度
         uniform float uVignette;     // 0..1 暗角
+        uniform float uWhiten;       // 0..1 美白强度（只提亮肤色区域）
 
         uniform mat3  uFilterMat;    // 滤镜色彩矩阵（行主序传入）
         uniform vec3  uFilterOff;    // 滤镜偏移
@@ -209,6 +251,16 @@ object Shaders {
             // 冷暖
             col.r += uWarmth * 0.05;
             col.b -= uWarmth * 0.05;
+
+            // ---------- 美白：只提亮肤色区域 ----------
+            // 复用磨皮同款肤色判定（偏暖、不太暗、不过曝），所以背景/衣服/头发不动。
+            // 提亮 + 轻微降饱和：只提亮会惨白，降一点饱和更接近"瓷白"的观感。
+            if (uWhiten > 0.001) {
+                float m = skinMask(c0);
+                float w = uWhiten * m;
+                col += w * 0.18;
+                col = mix(col, vec3(luma(col)), w * 0.10);
+            }
 
             // 滤镜（色彩矩阵 + 偏移）
             col = clamp(uFilterMat * col + uFilterOff, 0.0, 1.0);

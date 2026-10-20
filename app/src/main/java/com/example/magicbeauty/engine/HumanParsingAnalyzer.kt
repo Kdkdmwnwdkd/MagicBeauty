@@ -56,6 +56,11 @@ class HumanParsingAnalyzer(context: Context) {
         /** 人体外接框顶/底（GL 坐标）——无蒙版兜底时限制位移垂直范围，头顶上方背景不动 */
         val bodyTopY: Float = 0f,
         val bodyBottomY: Float = 0f,
+        /** 瘦肩/瘦臀/瘦腿 的引导（无关键点时的解析兜底，pose 有时不用它） */
+        val shoulderY: Float = 0f,
+        val shoulderHalfW: Float = 0f,
+        val hipHalfW: Float = 0f,
+        val legHalfW: Float = 0f,
         /** 腿段里的人体覆盖率是否够（白丝袜+浅色墙时分割会把腿判成背景） */
         val maskReliable: Boolean,
         val hasBody: Boolean
@@ -311,6 +316,21 @@ class HumanParsingAnalyzer(context: Context) {
         }
         val waistHalf = if (wr > wl) ((wr - wl) / 2f / n).coerceIn(0.04f, 0.32f) else halfW
 
+        // —— 瘦肩/瘦臀/瘦腿 的宽度实测（pose 缺失时的兜底引导）——
+        // 肩线：头顶往下 15% 身高处（人头约占 13~15%），量该行人体宽度（含下垂的手臂，
+        // 瘦肩本来就要覆盖三角肌+上臂，含手臂正合适）
+        val shoulderRow = (minY + (maxY - minY) * 0.15f).toInt().coerceIn(0, n - 1)
+        val shoulderHalf = rowHalfWidth(cls, n, shoulderRow)
+        // 胯宽：直接用腰线行实测（胯和腰只差 10% 左右，够准）；
+        // 注意胯的"线"不能落在裙摆上——裙摆以下那是裙子不是胯
+        val hipHalf = waistHalf
+        // 腿宽：裙摆/裤腰与脚踝的中点行实测（裤子就是裤腿宽，光腿就是腿宽）
+        val midLegRow = (((hemImg + ankleImg) / 2f) * n).toInt().coerceIn(0, n - 1)
+        val legHalf = rowHalfWidth(cls, n, midLegRow).coerceIn(0.020f, 0.12f)
+        // 胯线（GL）：长裤用裤腰，裙子/连衣裙用腰线（裙摆下沿是裙脚，不是胯）
+        val hipRowPx = if (pantsLike) (hemImg * n).toInt() else waistRow
+        val hipGl = 1f - hipRowPx.toFloat() / n
+
         // 腿段里的人体覆盖率：白丝袜+浅墙、白裙+白背景这类，分割会把腿判成背景，
         // 蒙版在腿上就是 0 —— 位移被整段抹掉，表现就是“拉腿完全没反应”。
         // 覆盖率太低时干脆不用蒙版（宁可背景动一点，也不能拉了没反应）。
@@ -338,11 +358,15 @@ class HumanParsingAnalyzer(context: Context) {
             return Result(
                 hemY = 1f - ankleImg, hemHalfW = halfW, edgeLift = 0f, isPants = true,
                 debug = "pants", mask = mask, maskSize = n,
-                hipY = 1f - hemImg, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
+                hipY = hipGl, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
                 centerX = cx, waistY = waistGl, halfW = halfW,
                 waistHalfW = waistHalf, maskReliable = maskReliable, hasBody = true,
                 bodyTopY = 1f - minY.toFloat() / n,
-                bodyBottomY = if (segCut) 1f - ankleEst else 1f - maxY.toFloat() / n
+                bodyBottomY = if (segCut) 1f - ankleEst else 1f - maxY.toFloat() / n,
+                shoulderY = 1f - shoulderRow.toFloat() / n,
+                shoulderHalfW = shoulderHalf.coerceIn(0.03f, 0.40f),
+                hipHalfW = hipHalf,
+                legHalfW = legHalf
             )
         }
 
@@ -388,12 +412,33 @@ class HumanParsingAnalyzer(context: Context) {
         return Result(
             hemY = hemGl, hemHalfW = hemHalf, edgeLift = lift, isPants = false,
             debug = "hem %.2f".format(hemImg), mask = mask, maskSize = n,
-            hipY = 1f - hemImg, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
+            hipY = hipGl, legTopY = 1f - hemImg, ankleY = 1f - ankleImg,
             centerX = cx, waistY = waistGl, halfW = halfW,
             waistHalfW = waistHalf, maskReliable = maskReliable, hasBody = true,
                 bodyTopY = 1f - minY.toFloat() / n,
-                bodyBottomY = if (segCut) 1f - ankleEst else 1f - maxY.toFloat() / n
+                bodyBottomY = if (segCut) 1f - ankleEst else 1f - maxY.toFloat() / n,
+                shoulderY = 1f - shoulderRow.toFloat() / n,
+                shoulderHalfW = shoulderHalf.coerceIn(0.03f, 0.40f),
+                hipHalfW = hipHalf,
+                legHalfW = legHalf
         )
+    }
+
+    /**
+     * 量某一行的“人体宽度”：非背景像素的左右极值，返回半宽（按图宽归一化）。
+     * 用来在 pose 缺失时实测肩宽/腿宽，作为瘦肩/瘦腿的作用带。
+     */
+    private fun rowHalfWidth(cls: ByteArray, n: Int, row: Int): Float {
+        val r = row.coerceIn(0, n - 1)
+        var l = n; var rr = -1
+        val base = r * n
+        for (x in 0 until n) {
+            if (cls[base + x].toInt() != C_BG) {
+                if (x < l) l = x
+                if (x > rr) rr = x
+            }
+        }
+        return if (rr > l) ((rr - l) / 2f) / n else 0f
     }
 
     /**
